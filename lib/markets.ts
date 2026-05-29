@@ -19,7 +19,7 @@ export interface MarketMeta {
 export const MARKET_METADATA: Record<MarketKey, MarketMeta> = {
   ip: {
     label: "IP",
-    coingeckoId: "story-protocol",
+    coingeckoId: "story-2",
     assetIndex: 0,
     feedAddress: "0xE23eCA12D7D2ED3829499556F6dCE06642AFd990",
     category: 0

@@ -78,6 +78,7 @@ async function main() {
   }
 
   const bettorsToReveal: `0x${string}`[] = [];
+  const vaultIdsToReveal: string[] = [];
   const choicesToReveal: number[] = [];
 
   for (const log of validBets) {
@@ -87,7 +88,7 @@ async function main() {
     console.log(`Decrypting vault ${vaultId} for bettor ${bettor}...`);
     try {
       const { dataKey } = await cdrClient.consumer.accessCDR({
-        uuid: vaultId,
+        uuid: Number(vaultId),
         accessAuxData: "0x",
         timeoutMs: 120_000
       });
@@ -100,6 +101,7 @@ async function main() {
       }
 
       bettorsToReveal.push(bettor);
+      vaultIdsToReveal.push(vaultId);
       choicesToReveal.push(payload.direction);
       console.log(
         `✅ Decrypted successfully! Bettor ${bettor} chose ${payload.direction === 1 ? "Up" : "Down"}`
@@ -124,6 +126,7 @@ async function main() {
     {
       inputs: [
         { internalType: "address[]", name: "bettorAddresses", type: "address[]" },
+        { internalType: "string[]", name: "vaultIds", type: "string[]" },
         { internalType: "uint8[]", name: "choices", type: "uint8[]" }
       ],
       name: "revealChoices",
@@ -137,7 +140,7 @@ async function main() {
     address: ZERO_SIGHT_MARKET_ADDRESS,
     abi: REVEAL_ABI,
     functionName: "revealChoices",
-    args: [bettorsToReveal, choicesToReveal],
+    args: [bettorsToReveal, vaultIdsToReveal, choicesToReveal],
     account
   });
 

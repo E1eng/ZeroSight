@@ -91,20 +91,22 @@ contract ZeroSightMarketTest is Test {
         assertEq(bets[0].choiceRevealed, false);
     }
 
-    function testFailPlaceBetWrongAsset() public {
+    function testRevertPlaceBetWrongAsset() public {
         testStartNextMarket();
 
         vm.startPrank(bettor1);
+        vm.expectRevert("Inactive asset");
         market.placeBet{value: 1 ether}("vault-123", 1); // Asset 1 when market is 0
         vm.stopPrank();
     }
 
-    function testFailPlaceBetAfterDeadline() public {
+    function testRevertPlaceBetAfterDeadline() public {
         testStartNextMarket();
 
         vm.warp(block.timestamp + 2 hours); // Past deadline
 
         vm.startPrank(bettor1);
+        vm.expectRevert("Betting closed");
         market.placeBet{value: 1 ether}("vault-123", 0);
         vm.stopPrank();
     }
@@ -127,12 +129,16 @@ contract ZeroSightMarketTest is Test {
         bettors[0] = bettor1;
         bettors[1] = bettor2;
 
+        string[] memory vaultIds = new string[](2);
+        vaultIds[0] = "vault-1";
+        vaultIds[1] = "vault-2";
+
         uint8[] memory choices = new uint8[](2);
         choices[0] = 1; // Up
         choices[1] = 0; // Down
 
         vm.prank(owner);
-        market.revealChoices(bettors, choices);
+        market.revealChoices(bettors, vaultIds, choices);
 
         assertEq(market.totalStakeByChoice(1), 1 ether);
         assertEq(market.totalStakeByChoice(0), 2 ether);
@@ -181,11 +187,15 @@ contract ZeroSightMarketTest is Test {
 
         address[] memory bettors = new address[](1);
         bettors[0] = bettor1;
+        
+        string[] memory vaultIds = new string[](1);
+        vaultIds[0] = "vault-1";
+
         uint8[] memory choices = new uint8[](1);
         choices[0] = 1; // Up
 
         vm.prank(owner);
-        market.revealChoices(bettors, choices);
+        market.revealChoices(bettors, vaultIds, choices);
 
         // Resolve market: Price went DOWN
         vm.prank(owner);

@@ -17,10 +17,12 @@ tsconfig.tsbuildinfo
 
 # Foundry
 cache
+out
+broadcast
 lib/openzeppelin-contracts
 lib/openzeppelin-contracts-upgradeable
 lib/redstone-oracles-monorepo
-broadcast
+lib/forge-std
 
 # Husky
 .husky/_/

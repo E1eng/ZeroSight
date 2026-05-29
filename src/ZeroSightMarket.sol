@@ -198,9 +198,10 @@ contract ZeroSightMarket is
      * @dev Called by the owner off-chain after decrypting the CDR vaults.
      *      Must be called before resolveMarket.
      */
-    function revealChoices(address[] calldata bettorAddresses, uint8[] calldata choices) external onlyOwner {
-        require(marketStatus == MarketStatus.Locked || block.timestamp >= deadline, "Market still open");
-        require(bettorAddresses.length == choices.length, "Length mismatch");
+    function revealChoices(address[] calldata bettorAddresses, string[] calldata vaultIds, uint8[] calldata choices) external onlyOwner {
+        require(marketStatus == MarketStatus.Locked || marketStatus == MarketStatus.Open, "Resolution blocked");
+        require(block.timestamp >= deadline, "Deadline not reached");
+        require(bettorAddresses.length == choices.length && bettorAddresses.length == vaultIds.length, "Length mismatch");
 
         if (marketStatus == MarketStatus.Open) {
             marketStatus = MarketStatus.Locked;
@@ -210,6 +211,7 @@ contract ZeroSightMarket is
         uint256 revealedCount = 0;
         for (uint256 i = 0; i < bettorAddresses.length; i++) {
             address bettor = bettorAddresses[i];
+            string calldata vaultId = vaultIds[i];
             uint8 choice = choices[i];
             require(choice <= 1, "Invalid choice");
 
@@ -218,11 +220,12 @@ contract ZeroSightMarket is
                 BetInfo storage bet = bets[j];
                 // In a real production scenario with multiple rounds, we'd ensure
                 // we are only revealing the active round's bets. Here we reveal unrevealed ones.
-                if (!bet.choiceRevealed && bet.assetIndex == activeAsset) {
+                if (!bet.choiceRevealed && bet.assetIndex == activeAsset && keccak256(bytes(bet.vaultId)) == keccak256(bytes(vaultId))) {
                     bet.direction = choice;
                     bet.choiceRevealed = true;
                     totalStakeByChoice[choice] += bet.amount;
                     revealedCount++;
+                    break;
                 }
             }
         }
