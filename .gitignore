@@ -13,11 +13,14 @@ yarn-error.log*
 .env.local
 .env.*.local
 .windsurf
+tsconfig.tsbuildinfo
 
 # Foundry
 cache
-out/
-lib/
+lib/openzeppelin-contracts
+lib/openzeppelin-contracts-upgradeable
+lib/redstone-oracles-monorepo
+broadcast
 
 # Husky
 .husky/_/

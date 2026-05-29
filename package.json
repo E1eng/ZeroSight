@@ -17,14 +17,18 @@
     "@headlessui/react": "^1.7.18",
     "@piplabs/cdr-sdk": "^0.2.1",
     "@privy-io/react-auth": "^1.69.0",
+    "@redstone-finance/evm-connector": "^0.9.0",
+    "@redstone-finance/protocol": "^0.9.0",
     "@tanstack/react-query": "^5.51.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.379.0",
     "next": "14.2.3",
+    "ethers": "^5.8.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "recharts": "^2.9.0",
     "tailwind-merge": "^2.5.2",
+    "ts-node": "^10.9.1",
     "viem": "^2.21.0"
   },
   "devDependencies": {

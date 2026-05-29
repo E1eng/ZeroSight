@@ -5,9 +5,10 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 
 import { MarketToggle } from "@/components/market-toggle";
 import { PriceChart } from "@/components/price-chart";
+import { MarketStatusDisplay } from "@/components/market-status";
 import { MARKET_METADATA, type MarketKey } from "@/lib/markets";
 import { createCdrClient, encryptPayload } from "@/lib/cdr";
-import { placeBetOnChain } from "@/lib/market-contract";
+import { placeBetOnChain, getMarketState } from "@/lib/market-contract";
 import { STORY_CAIP_ID, STORY_CHAIN_ID } from "@/lib/story";
 
 const directions = [
@@ -17,12 +18,30 @@ const directions = [
 
 export default function DashboardPage() {
   const [market, setMarket] = useState<MarketKey>("ip");
-  const [direction, setDirection] = useState<(typeof directions)[number]["value"]>(directions[0].value);
+  const [direction, setDirection] = useState<(typeof directions)[number]["value"]>(
+    directions[0].value
+  );
   const [amount, setAmount] = useState(0.1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [marketStatus, setMarketStatus] = useState<number>(0);
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
+
+  import("react").then(({ useEffect }) => {
+    useEffect(() => {
+      let interval: NodeJS.Timeout;
+      async function checkStatus() {
+        try {
+          const state = await getMarketState();
+          setMarketStatus(state.status as number);
+        } catch (e) {}
+      }
+      checkStatus();
+      interval = setInterval(checkStatus, 5000);
+      return () => clearInterval(interval);
+    }, []);
+  });
 
   const activeMetadata = useMemo(() => MARKET_METADATA[market], [market]);
   const connectedWallet = useMemo(() => {
@@ -55,7 +74,9 @@ export default function DashboardPage() {
 
     const wallet = connectedWallet;
     if (!wallet) {
-      setStatusMessage("No connected wallet detected. Link a wallet through the Privy modal first.");
+      setStatusMessage(
+        "No connected wallet detected. Link a wallet through the Privy modal first."
+      );
       return;
     }
 
@@ -95,12 +116,14 @@ export default function DashboardPage() {
         payload: payloadBytes
       });
 
-      setStatusMessage(`Encrypted vault #${result.uuid}. Allocation tx: ${result.txHash}. Broadcasting bet…`);
+      setStatusMessage(
+        `Encrypted vault #${result.uuid}. Allocation tx: ${result.txHash}. Broadcasting bet…`
+      );
 
       const betTx = await placeBetOnChain({
         wallet: walletAdapter,
         vaultId: result.uuid.toString(),
-        category: activeMetadata.category,
+        assetIndex: activeMetadata.assetIndex,
         amount
       });
 
@@ -108,7 +131,9 @@ export default function DashboardPage() {
     } catch (error) {
       console.error("Failed to encrypt bet", error);
       const message =
-        error instanceof Error ? error.message : "Failed to encrypt bet. Please check console for details.";
+        error instanceof Error
+          ? error.message
+          : "Failed to encrypt bet. Please check console for details.";
       setStatusMessage(message);
     } finally {
       setIsSubmitting(false);
@@ -122,7 +147,7 @@ export default function DashboardPage() {
     direction,
     amount,
     activeMetadata.feedAddress,
-    activeMetadata.category
+    activeMetadata.assetIndex
   ]);
 
   return (
@@ -154,11 +179,16 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="rounded-3xl border border-white/5 bg-white/5 p-6 backdrop-blur-xl">
-          <div className="flex items-center justify-between text-sm text-zinc-400">
-            <span>{activeMetadata.label} market</span>
-            <span className="font-mono text-zinc-300">Feed: {activeMetadata.feedAddress}</span>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-col gap-1 text-sm text-zinc-400">
+              <span>{activeMetadata.label} market</span>
+              <span className="font-mono text-xs text-zinc-500">
+                Feed: {activeMetadata.feedAddress}
+              </span>
+            </div>
+            <MarketStatusDisplay />
           </div>
-          <div className="mt-6">
+          <div>
             <PriceChart market={market} />
           </div>
         </div>
@@ -168,12 +198,15 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-xl font-semibold text-zinc-100">Encrypted Order Ticket</h2>
           <p className="text-sm text-zinc-400">
-            Enter your stake and directional bias. We’ll encrypt your payload locally before broadcasting to ZeroSight.
+            Enter your stake and directional bias. We’ll encrypt your payload locally before
+            broadcasting to ZeroSight.
           </p>
         </div>
 
         <div className="space-y-4">
-          <label className="block text-xs uppercase tracking-[0.3em] text-zinc-500">Bet Amount</label>
+          <label className="block text-xs uppercase tracking-[0.3em] text-zinc-500">
+            Bet Amount
+          </label>
           <div className="rounded-2xl border border-white/10 bg-black/40 p-4 focus-within:border-electric focus-within:shadow-glow">
             <div className="flex items-center justify-between">
               <input
@@ -186,7 +219,7 @@ export default function DashboardPage() {
                   setAmount(Number.isFinite(nextValue) ? nextValue : 0);
                 }}
                 className="w-full bg-transparent text-2xl font-semibold text-zinc-100 focus:outline-none disabled:opacity-50"
-                disabled={!authenticated || isSubmitting}
+                disabled={!authenticated || isSubmitting || marketStatus !== 0}
               />
               <span className="text-sm uppercase tracking-[0.2em] text-zinc-500">STORY</span>
             </div>
@@ -203,7 +236,7 @@ export default function DashboardPage() {
                   key={item.value}
                   type="button"
                   onClick={() => setDirection(item.value)}
-                  disabled={!authenticated || isSubmitting}
+                  disabled={!authenticated || isSubmitting || marketStatus !== 0}
                   className={`rounded-2xl border px-4 py-5 text-lg font-semibold transition ${
                     isActive
                       ? item.value === 1
@@ -222,10 +255,10 @@ export default function DashboardPage() {
         <button
           type="button"
           onClick={handleBet}
-          disabled={!ready || isSubmitting}
+          disabled={!ready || isSubmitting || marketStatus !== 0}
           className="mt-auto rounded-2xl border border-electric/40 bg-electric px-6 py-4 text-lg font-semibold text-night-900 shadow-glow transition hover:border-electric hover:bg-electric/90 disabled:cursor-not-allowed disabled:border-white/20 disabled:bg-white/10 disabled:text-zinc-500"
         >
-          Encrypt &amp; Place Bet 🔒
+          {marketStatus !== 0 ? "Market Closed" : "Encrypt & Place Bet 🔒"}
         </button>
 
         {statusMessage && (
@@ -236,8 +269,9 @@ export default function DashboardPage() {
 
         <div className="rounded-2xl border border-white/10 bg-black/30 p-4 text-xs text-zinc-500">
           <p>
-            Your bet payload remains hidden until resolution. Winners will supply decrypted payloads to claim their share of
-            the pool. Support for sports and politics markets will roll out via future upgrades.
+            Your bet payload remains hidden until resolution. Winners will supply decrypted payloads
+            to claim their share of the pool. Support for sports and politics markets will roll out
+            via future upgrades.
           </p>
         </div>
       </aside>

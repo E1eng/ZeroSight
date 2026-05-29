@@ -3,6 +3,13 @@ src = "src"
 out = "out"
 libs = ["lib"]
 
+remappings = [
+  "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "forge-std/=lib/openzeppelin-contracts-upgradeable/lib/forge-std/src/",
+  "@redstone-finance/evm-connector/=lib/redstone-oracles-monorepo/packages/evm-connector/"
+]
+
 auto_detect_remappings = false
 
 [rpc_endpoints]

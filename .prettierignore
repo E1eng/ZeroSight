@@ -4,3 +4,8 @@ dist
 build
 coverage
 .husky
+out
+broadcast
+lib/openzeppelin-contracts
+lib/openzeppelin-contracts-upgradeable
+lib/redstone-oracles-monorepo
