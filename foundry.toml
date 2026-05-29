@@ -1,0 +1,9 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+
+auto_detect_remappings = false
+
+[rpc_endpoints]
+story = "${STORY_RPC_URL}"
