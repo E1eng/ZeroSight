@@ -10,7 +10,9 @@ const config: Config = {
           900: "#050507",
           800: "#0a0a10"
         },
-        electric: "#4f6bff"
+        electric: "#4f6bff",
+        neon: "#BAFF00",
+        dark: "#141414"
       },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui"],

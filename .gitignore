@@ -29,3 +29,7 @@ lib/forge-std
 
 # Misc
 *.log
+
+# Tests
+__tests__/
+test/
