@@ -2,7 +2,7 @@ import { CDRClient, initWasm, uuidToLabel } from "@piplabs/cdr-sdk";
 import { createPublicClient, encodeAbiParameters, http, toHex } from "viem";
 
 import {
-  OWNER_WRITE_CONDITION,
+  SIGNER_CONDITION_ADDRESS,
   OWNER_ADDRESS,
   STORY_API_URL,
   STORY_RPC_URL,
@@ -55,15 +55,16 @@ export async function encryptPayload(params: {
 }) {
   const { client, walletAddress, payload } = params;
 
-  // Owner-only: writer must match wallet, reads gated to same EOA (skip contract validation).
+  // Owner-only: writer must match wallet, reads gated to the OWNER_ADDRESS EOA via the condition contract.
   const writeConditionData = encodeAbiParameters([{ type: "address" }], [walletAddress]);
+  const readConditionData = encodeAbiParameters([{ type: "address" }], [OWNER_ADDRESS]);
 
   const allocation = await client.uploader.allocate({
     updatable: false,
-    writeConditionAddr: OWNER_WRITE_CONDITION,
+    writeConditionAddr: SIGNER_CONDITION_ADDRESS,
     writeConditionData,
-    readConditionAddr: OWNER_ADDRESS,
-    readConditionData: "0x",
+    readConditionAddr: SIGNER_CONDITION_ADDRESS, // This must be the Condition Contract, not the EOA directly
+    readConditionData,
     skipConditionValidation: true
   });
 

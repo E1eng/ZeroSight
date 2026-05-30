@@ -15,16 +15,21 @@ const ZERO_SIGHT_MARKET_ABI = [
     type: "function"
   },
   {
-    inputs: [],
-    name: "marketStatus",
-    outputs: [{ internalType: "enum ZeroSightMarket.MarketStatus", name: "", type: "uint8" }],
-    stateMutability: "view",
-    type: "function"
-  },
-  {
-    inputs: [],
-    name: "totalPool",
-    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    inputs: [{ internalType: "uint8", name: "assetIndex", type: "uint8" }],
+    name: "markets",
+    outputs: [
+      { internalType: "enum ZeroSightMarket.MarketStatus", name: "status", type: "uint8" },
+      { internalType: "enum ZeroSightMarket.MarketCategory", name: "category", type: "uint8" },
+      { internalType: "uint256", name: "totalPool", type: "uint256" },
+      { internalType: "uint256", name: "openedAt", type: "uint256" },
+      { internalType: "uint256", name: "deadline", type: "uint256" },
+      { internalType: "uint256", name: "openingPrice", type: "uint256" },
+      { internalType: "uint256", name: "resolvedPrice", type: "uint256" },
+      { internalType: "uint256", name: "winningChoice", type: "uint256" },
+      { internalType: "uint256", name: "payoutPool", type: "uint256" },
+      { internalType: "uint256", name: "winningSharesTotal", type: "uint256" },
+      { internalType: "uint256", name: "distributionIndex", type: "uint256" }
+    ],
     stateMutability: "view",
     type: "function"
   }
@@ -68,29 +73,24 @@ const publicClient = createPublicClient({
   transport: http(STORY_RPC_URL)
 });
 
-export async function getMarketState() {
+export async function getMarketState(assetIndex: AssetIndex) {
   if (
     !ZERO_SIGHT_MARKET_ADDRESS ||
     ZERO_SIGHT_MARKET_ADDRESS === "0x0000000000000000000000000000000000000000"
   ) {
-    return { status: 2, totalPool: BigInt(0) }; // Default to resolved if no contract
+    return { status: 2, totalPool: BigInt(0), openedAt: 0 }; // Default to resolved if no contract
   }
 
-  const [status, totalPool] = await Promise.all([
-    publicClient.readContract({
-      address: ZERO_SIGHT_MARKET_ADDRESS,
-      abi: ZERO_SIGHT_MARKET_ABI,
-      functionName: "marketStatus"
-    }),
-    publicClient.readContract({
-      address: ZERO_SIGHT_MARKET_ADDRESS,
-      abi: ZERO_SIGHT_MARKET_ABI,
-      functionName: "totalPool"
-    })
-  ]);
+  const marketData = await publicClient.readContract({
+    address: ZERO_SIGHT_MARKET_ADDRESS,
+    abi: ZERO_SIGHT_MARKET_ABI,
+    functionName: "markets",
+    args: [assetIndex]
+  }) as any;
 
   return {
-    status: Number(status),
-    totalPool: totalPool as unknown as bigint
+    status: Number(marketData[0]),
+    totalPool: marketData[2] as bigint,
+    openedAt: Number(marketData[3])
   };
 }

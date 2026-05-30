@@ -11,35 +11,42 @@ async function main() {
   const privateKey = process.env.MARKET_OPERATOR_PRIVATE_KEY ?? requireEnv("DEPLOYER_PRIVATE_KEY");
   const contractAddress = requireEnv("ZERO_SIGHT_MARKET_ADDRESS");
 
-  const batchSize = Number(process.argv[2] ?? DEFAULT_BATCH_SIZE);
+  const assetInput = (process.argv[2] ?? process.env.MARKET_ASSET ?? "ip").toLowerCase();
+  const assetLabels: Record<string, number> = { ip: 0, btc: 1, eth: 2 };
+  const assetIndex = assetLabels[assetInput];
+  if (assetIndex === undefined) throw new Error(`Unknown asset: ${assetInput}`);
+
+  const batchSize = Number(process.argv[3] ?? DEFAULT_BATCH_SIZE);
   if (!Number.isFinite(batchSize) || batchSize <= 0) {
-    throw new Error(`Invalid batch size: ${process.argv[2]}`);
+    throw new Error(`Invalid batch size: ${process.argv[3]}`);
   }
 
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(privateKey, provider);
   const contract = new ethers.Contract(contractAddress, MARKET_ABI, wallet);
 
-  const status = Number(await contract.marketStatus());
+  const marketState = await contract.markets(assetIndex);
+  const status = Number(marketState.status);
   if (status !== 2) {
     throw new Error(`Market must be Resolved to distribute. Current status: ${status}`);
   }
 
-  const totalBettors = Number(await contract.getBettorCount());
+  const totalBettors = Number(await contract.getBettorCount(assetIndex));
   console.log(`Total bettors: ${totalBettors}`);
 
   let distributed = false;
   let round = 0;
 
   while (!distributed) {
-    const idx = Number(await contract.distributionIndex());
+    const marketStateLoop = await contract.markets(assetIndex);
+    const idx = Number(marketStateLoop.distributionIndex);
     console.log(`Round ${++round}: distributing from index ${idx} (batch=${batchSize})`);
 
-    const tx = await contract.distributeWinnings(batchSize);
+    const tx = await contract.distributeWinnings(assetIndex, batchSize);
     console.log(`  tx: ${tx.hash}`);
     await tx.wait();
 
-    distributed = await contract.isFullyDistributed();
+    distributed = await contract.isFullyDistributed(assetIndex);
     console.log(`  fullyDistributed: ${distributed}`);
   }
 
@@ -49,7 +56,7 @@ async function main() {
   const remaining = await provider.getBalance(contractAddress);
   if (remaining.gt(0)) {
     console.log(`Sweeping ${ethers.utils.formatEther(remaining)} remaining balance...`);
-    const sweepTx = await contract.sweepUnclaimed();
+    const sweepTx = await contract.sweepUnclaimed(assetIndex);
     console.log(`  sweepUnclaimed tx: ${sweepTx.hash}`);
     await sweepTx.wait();
     console.log("Sweep complete.");

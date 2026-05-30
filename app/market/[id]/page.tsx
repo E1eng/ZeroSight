@@ -23,7 +23,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const market = (MARKET_LIST.includes(params.id as MarketKey) ? params.id : "ip") as MarketKey;
   
-  const [showDetails, setShowDetails] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
   
   const [direction, setDirection] = useState<(typeof directions)[number]["value"]>(
     directions[0].value
@@ -31,7 +31,10 @@ export default function MarketPage({ params }: { params: { id: string } }) {
   const [amount, setAmount] = useState(0.1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [marketStatus, setMarketStatus] = useState<number>(0);
+  const [marketState, setMarketState] = useState<{ status: number; openedAt: number }>({
+    status: 0,
+    openedAt: 0
+  });
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
 
@@ -47,8 +50,8 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     let interval: NodeJS.Timeout;
     async function checkStatus() {
       try {
-        const state = await getMarketState();
-        setMarketStatus(state.status as number);
+        const state = await getMarketState(activeMetadata.assetIndex);
+        setMarketState({ status: state.status as number, openedAt: state.openedAt });
       } catch (e) {}
     }
     checkStatus();
@@ -94,8 +97,8 @@ export default function MarketPage({ params }: { params: { id: string } }) {
       return;
     }
 
-    if (amount <= 0) {
-      setStatusMessage("Enter a positive stake amount before placing a bet.");
+    if (amount < 0.01) {
+      setStatusMessage("Minimum bet is 0.01 IP.");
       return;
     }
 
@@ -116,6 +119,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
 
       const payloadBytes = new TextEncoder().encode(
         JSON.stringify({
+          bettor: walletAdapter.address.toLowerCase(),
           market,
           direction,
           amount,
@@ -240,7 +244,17 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-semibold text-zinc-500">CREATED</p>
-                  <p className="text-zinc-300">Sat, May 30, 09:50 PM</p>
+                  <p className="text-zinc-300">
+                    {marketState.openedAt > 0
+                      ? new Date(marketState.openedAt * 1000).toLocaleString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })
+                      : "Sat, May 30, 09:50 PM"}
+                  </p>
                 </div>
               </div>
               
@@ -270,7 +284,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
               <MarketStatusDisplay />
             </div>
             <div>
-              <PriceChart market={market} />
+              <PriceChart market={market} openedAt={marketState.openedAt} />
             </div>
           </div>
         </section>
@@ -300,7 +314,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                     setAmount(Number.isFinite(nextValue) ? nextValue : 0);
                   }}
                   className="w-full bg-transparent text-2xl font-semibold text-zinc-100 focus:outline-none disabled:opacity-50"
-                  disabled={!authenticated || isSubmitting || marketStatus !== 0}
+                  disabled={!authenticated || isSubmitting || marketState.status !== 0}
                 />
                 <span className="text-sm uppercase tracking-[0.2em] text-zinc-500">STORY</span>
               </div>
@@ -319,7 +333,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                     key={item.value}
                     type="button"
                     onClick={() => setDirection(item.value)}
-                    disabled={!authenticated || isSubmitting || marketStatus !== 0}
+                    disabled={!authenticated || isSubmitting || marketState.status !== 0}
                     className={`rounded-2xl border px-4 py-5 text-lg font-semibold transition ${
                       isActive
                         ? item.value === 1
@@ -338,10 +352,10 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           <button
             type="button"
             onClick={handleBet}
-            disabled={!ready || isSubmitting || marketStatus !== 0}
+            disabled={!ready || isSubmitting || marketState.status !== 0}
             className="mt-auto rounded-2xl bg-neon px-6 py-4 text-lg font-bold text-black transition hover:bg-neon/90 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-zinc-500"
           >
-            {marketStatus !== 0 ? "Market Closed" : "Encrypt & Place Bet 🔒"}
+            {marketState.status !== 0 ? "Market Closed" : "Encrypt & Place Bet 🔒"}
           </button>
 
           {statusMessage && (

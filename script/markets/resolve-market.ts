@@ -14,18 +14,22 @@ async function main() {
   const wallet = new ethers.Wallet(privateKey, provider);
   const contract = new ethers.Contract(contractAddress, MARKET_ABI, wallet);
 
-  const status = Number(await contract.marketStatus());
+  const assetInput = (process.argv[2] ?? process.env.MARKET_ASSET ?? "ip").toLowerCase();
+  const assetLabels: Record<string, number> = { ip: 0, btc: 1, eth: 2 };
+  const assetIndex = assetLabels[assetInput] as AssetIndex;
+  if (assetIndex === undefined) throw new Error(`Unknown asset: ${assetInput}`);
+
+  const marketState = await contract.markets(assetIndex);
+  const status = Number(marketState.status);
   if (status === 2) {
     throw new Error(`Market is already resolved.`);
   }
 
-  const deadline = Number(await contract.deadline());
+  const deadline = Number(marketState.deadline);
   const now = Math.floor(Date.now() / 1000);
   if (now <= deadline) {
     throw new Error(`Deadline not passed yet. deadline=${deadline}, now=${now}`);
   }
-
-  const assetIndex = Number(await contract.activeAsset()) as AssetIndex;
   const dataFeedId = FEED_IDS[assetIndex];
 
   const dataServiceId = process.env.REDSTONE_DATA_SERVICE_ID ?? "redstone-primary-prod";
@@ -39,7 +43,7 @@ async function main() {
     dataFeeds: [dataFeedId]
   } as any);
 
-  const tx = await wrapped.resolveMarket();
+  const tx = await wrapped.resolveMarket(assetIndex);
   console.log(`resolveMarket tx: ${tx.hash}`);
   await tx.wait();
   console.log("Market resolved");

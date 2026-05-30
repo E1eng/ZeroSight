@@ -1,17 +1,14 @@
 export const MARKET_ABI = [
   "function startNextMarket(uint8 category, uint8 assetIndex, uint256 newDeadline) external",
-  "function resolveMarket() external",
-  "function distributeWinnings(uint256 batchSize) external",
-  "function sweepUnclaimed() external",
-  "function activeCategory() view returns (uint8)",
-  "function activeAsset() view returns (uint8)",
-  "function deadline() view returns (uint256)",
-  "function marketStatus() view returns (uint8)",
-  "function isFullyDistributed() view returns (bool)",
-  "function getBettorCount() view returns (uint256)",
-  "function totalPool() view returns (uint256)",
-  "function winningChoice() view returns (uint256)",
-  "function distributionIndex() view returns (uint256)"
+  "function revealChoices(uint8 assetIndex, address[] calldata bettorAddresses, string[] calldata vaultIds, uint8[] calldata choices) external",
+  "function resolveMarket(uint8 assetIndex) external",
+  "function distributeWinnings(uint8 assetIndex, uint256 batchSize) external",
+  "function sweepUnclaimed(uint8 assetIndex) external",
+  "function lockMarket(uint8 assetIndex) external",
+  "function isFullyDistributed(uint8 assetIndex) view returns (bool)",
+  "function getBettorCount(uint8 assetIndex) view returns (uint256)",
+  "function markets(uint8 assetIndex) view returns (uint8 status, uint8 category, uint256 totalPool, uint256 openedAt, uint256 deadline, uint256 openingPrice, uint256 resolvedPrice, uint256 winningChoice, uint256 payoutPool, uint256 winningSharesTotal, uint256 distributionIndex)",
+  "function getUserBets(uint8 assetIndex, address bettor) view returns (tuple(uint256 amount, uint256 shares, uint8 assetIndex, string vaultId, uint8 direction, bool choiceRevealed, bool distributed, uint256 placedAt)[])"
 ];
 
 export type MarketCategory = 0 | 1 | 2; // Crypto | Sports | Politics

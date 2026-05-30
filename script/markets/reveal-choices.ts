@@ -12,7 +12,12 @@ const ZERO_SIGHT_MARKET_ADDRESS = requireEnv(
 const PRIVATE_KEY = requireEnv("DEPLOYER_PRIVATE_KEY") as `0x${string}`;
 
 async function main() {
-  console.log("Starting choice reveal process...");
+  const assetInput = (process.argv[2] ?? process.env.MARKET_ASSET ?? "ip").toLowerCase();
+  const assetLabels: Record<string, number> = { ip: 0, btc: 1, eth: 2 };
+  const activeAsset = assetLabels[assetInput];
+  if (activeAsset === undefined) throw new Error(`Unknown asset: ${assetInput}`);
+  
+  console.log(`Starting choice reveal process for assetIndex: ${activeAsset}...`);
 
   await initWasm();
 
@@ -35,27 +40,19 @@ async function main() {
     apiUrl: STORY_API_URL
   });
 
-  // Check market status
+  // Check market status using the new mapping
   const marketStatus = await publicClient.readContract({
     address: ZERO_SIGHT_MARKET_ADDRESS,
     abi: MARKET_ABI,
-    functionName: "marketStatus"
-  });
+    functionName: "markets",
+    args: [activeAsset]
+  }) as any;
+  
+  const status = marketStatus[0]; // status is the first returned value
 
-  if (marketStatus !== 1) {
-    // MarketStatus.Locked = 1
-    // Wait, the owner can call revealChoices even if Open, and it will auto-lock.
-    // But it's safer to check if deadline has passed, or just attempt it.
-    console.log("Market status is", marketStatus);
+  if (status !== 1) {
+    console.log("Market status is", status);
   }
-
-  const activeAsset = await publicClient.readContract({
-    address: ZERO_SIGHT_MARKET_ADDRESS,
-    abi: MARKET_ABI,
-    functionName: "activeAsset"
-  });
-
-  console.log(`Fetching BetPlaced events for assetIndex: ${activeAsset}...`);
 
   const betPlacedEvent = parseAbiItem(
     "event BetPlaced(address indexed bettor, string vaultId, uint8 assetIndex, uint256 amount)"
@@ -96,6 +93,10 @@ async function main() {
       const payloadString = new TextDecoder().decode(dataKey);
       const payload = JSON.parse(payloadString);
 
+      if (!payload.bettor || payload.bettor.toLowerCase() !== bettor.toLowerCase()) {
+        throw new Error(`Vault Hijack Detected! Payload bettor ${payload.bettor} does not match tx bettor ${bettor}.`);
+      }
+
       if (payload.direction !== 0 && payload.direction !== 1) {
         throw new Error("Invalid direction payload");
       }
@@ -121,10 +122,10 @@ async function main() {
 
   console.log(`Submitting revealChoices for ${bettorsToReveal.length} bettors...`);
 
-  // We need the full ABI including revealChoices
   const REVEAL_ABI = [
     {
       inputs: [
+        { internalType: "uint8", name: "assetIndex", type: "uint8" },
         { internalType: "address[]", name: "bettorAddresses", type: "address[]" },
         { internalType: "string[]", name: "vaultIds", type: "string[]" },
         { internalType: "uint8[]", name: "choices", type: "uint8[]" }
@@ -140,7 +141,7 @@ async function main() {
     address: ZERO_SIGHT_MARKET_ADDRESS,
     abi: REVEAL_ABI,
     functionName: "revealChoices",
-    args: [bettorsToReveal, vaultIdsToReveal, choicesToReveal],
+    args: [activeAsset, bettorsToReveal, vaultIdsToReveal, choicesToReveal],
     account
   });
 

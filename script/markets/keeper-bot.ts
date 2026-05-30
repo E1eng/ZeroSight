@@ -14,6 +14,8 @@ const contract = new ethers.Contract(contractAddress, MARKET_ABI, provider);
 
 const CHECK_INTERVAL_MS = 15000; // Every 15 seconds
 
+const ASSETS = ["ip", "btc", "eth"];
+
 async function runScript(name: string, command: string) {
   console.log(`\n--- Running ${name} ---`);
   try {
@@ -29,59 +31,96 @@ async function runScript(name: string, command: string) {
   }
 }
 
-async function checkAndExecute() {
+async function checkAsset(asset: string, assetIndex: number) {
   try {
-    const status = Number(await contract.marketStatus());
-
-    // Status 0: Open, 1: Locked, 2: Resolved
-    if (status === 2) {
-      // If resolved, check if distribution is fully complete
-      const isDistributed = await contract.isFullyDistributed();
-      if (!isDistributed) {
-        console.log("Market resolved but not fully distributed. Distributing...");
-        await runScript("Distribute Winnings", "npx ts-node script/markets/distribute.ts");
-      }
-      return;
-    }
-
-    const deadline = Number(await contract.deadline());
+    const marketState = await contract.markets(assetIndex);
+    const status = Number(marketState.status);
+    const deadline = Number(marketState.deadline);
     const now = Math.floor(Date.now() / 1000);
 
-    if (now > deadline) {
-      console.log(`Deadline passed (${now} > ${deadline}). Executing resolution cycle...`);
-
-      if (status === 0) {
-        // Market is Open, we need to decrypt and reveal choices
-        const revealSuccess = await runScript(
-          "Reveal Choices",
-          "npx ts-node script/markets/reveal-choices.ts"
-        );
-        if (!revealSuccess) {
-          console.error("Reveal failed. Aborting cycle.");
+    // Status 0: Open, 1: Locked, 2: Resolved
+    // If deadline is 0, it means the market has never been initialized. Treat it as resolved to start a new one.
+    if (status === 2 || deadline === 0) {
+      // If resolved, check if distribution is fully complete (skip if deadline === 0 as it's uninitialized)
+      if (status === 2) {
+        const isDistributed = await contract.isFullyDistributed(assetIndex);
+        if (!isDistributed) {
+          console.log(`[${asset.toUpperCase()}] Market resolved but not fully distributed. Distributing...`);
+          await runScript(`Distribute Winnings (${asset})`, `npx ts-node script/markets/distribute.ts ${asset}`);
           return;
         }
       }
 
-      // After reveal, market is locked (or we just go straight to resolve if no bets)
-      // Resolve the market with Redstone oracle
-      const resolveSuccess = await runScript(
-        "Resolve Market",
-        "npx ts-node script/markets/resolve-market.ts"
-      );
-      if (resolveSuccess) {
-        // Finally, distribute the winnings
-        await runScript("Distribute Winnings", "npx ts-node script/markets/distribute.ts");
+      // PHASE 1: Market is settled. Start next hourly round automatically.
+      const d = new Date();
+      let targetHour = d.getHours();
+      
+      // If we're already past minute 50, schedule for the next hour's 50th minute
+      if (d.getMinutes() >= 50) {
+        targetHour += 1;
+      }
+      
+      // Set deadline exactly to the 50th minute of the target hour
+      const targetDate = new Date(d.getFullYear(), d.getMonth(), d.getDate(), targetHour, 50, 0, 0);
+      const targetUnix = Math.floor(targetDate.getTime() / 1000);
+      
+      // Fallback safeguard just in case
+      let offsetSeconds = targetUnix - now;
+      if (offsetSeconds <= 0) {
+        offsetSeconds = 3000; // default 50 mins
+      }
+      
+      console.log(`[${asset.toUpperCase()}] Starting new market. Deadline set to ${targetDate.toLocaleTimeString()} (Offset: ${offsetSeconds}s)`);
+      // Start market defaulting to crypto category
+      await runScript(`Start Market (${asset})`, `npx ts-node script/markets/start-market.ts ${asset} crypto ${offsetSeconds}`);
+      return;
+    }
+
+    if (now > deadline) {
+      // PHASE 2: Deadline passed, market should be locked/revealed (Minute 50)
+      if (status === 0) {
+        console.log(`[${asset.toUpperCase()}] Deadline passed (${now} > ${deadline}). Locking and revealing choices...`);
+        const revealSuccess = await runScript(
+          `Reveal Choices (${asset})`,
+          `npx ts-node script/markets/reveal-choices.ts ${asset}`
+        );
+        if (!revealSuccess) {
+          console.error(`[${asset.toUpperCase()}] Reveal failed. Aborting cycle.`);
+          return;
+        }
+      }
+
+      // PHASE 3: Check if it is time to resolve and distribute (Minute 60)
+      // Resolve happens exactly 10 minutes after the deadline.
+      const RESOLVE_TIME = deadline + (10 * 60);
+      if (now >= RESOLVE_TIME) {
+        console.log(`[${asset.toUpperCase()}] 10 minutes passed since deadline. Executing resolution cycle...`);
+        
+        const resolveSuccess = await runScript(
+          `Resolve Market (${asset})`,
+          `npx ts-node script/markets/resolve-market.ts ${asset}`
+        );
+        if (resolveSuccess) {
+          await runScript(`Distribute Winnings (${asset})`, `npx ts-node script/markets/distribute.ts ${asset}`);
+        }
+      } else {
+        console.log(`[${asset.toUpperCase()}] Market Locked. Waiting for resolution time (in ${RESOLVE_TIME - now} seconds)...`);
       }
     } else {
-      console.log(`Market Open. Time left: ${deadline - now} seconds...`);
+      console.log(`[${asset.toUpperCase()}] Market Open. Time left until lock: ${deadline - now} seconds...`);
     }
   } catch (err) {
-    console.error("Error in keeper loop:", err);
+    console.error(`Error in keeper loop for asset ${asset}:`, err);
   }
 }
 
+async function checkAndExecute() {
+  // Check all assets concurrently
+  await Promise.all(ASSETS.map((asset, index) => checkAsset(asset, index)));
+}
+
 async function main() {
-  console.log("Starting ZeroSight Keeper Bot 🤖...");
+  console.log("Starting ZeroSight Hourly Keeper Bot 🤖...");
   console.log(`Monitoring Contract: ${contractAddress}`);
 
   // Run immediately, then loop

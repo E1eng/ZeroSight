@@ -15,8 +15,6 @@ import {
 async function main() {
   const rpcUrl = requireEnv("STORY_RPC_URL");
   const privateKey = process.env.MARKET_OPERATOR_PRIVATE_KEY ?? requireEnv("DEPLOYER_PRIVATE_KEY");
-  const contractAddress = requireEnv("ZERO_SIGHT_MARKET_ADDRESS");
-
   // Parse asset (ip | btc | eth) — defaults to "ip".
   const assetInput = (process.argv[2] ?? process.env.MARKET_ASSET ?? "ip").toLowerCase();
   const assetIndex = ASSET_LABELS[assetInput];
@@ -25,6 +23,9 @@ async function main() {
       `Unknown asset "${assetInput}". Valid: ${Object.keys(ASSET_LABELS).join(", ")}`
     );
   }
+
+  const envKey = `NEXT_PUBLIC_${assetInput.toUpperCase()}_MARKET_ADDRESS`;
+  const contractAddress = requireEnv(envKey);
 
   // Parse category — defaults to "crypto".
   const categoryInput = (process.argv[3] ?? process.env.MARKET_CATEGORY ?? "crypto").toLowerCase();

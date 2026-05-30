@@ -1,12 +1,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine } from "recharts";
 
 import type { MarketKey } from "@/lib/markets";
 
 type PriceChartProps = {
   market: MarketKey;
+  openedAt?: number;
 };
 
 type CoinGeckoResponse = {
@@ -20,7 +21,7 @@ function formatTimestamp(ts: number) {
   }).format(ts);
 }
 
-export function PriceChart({ market }: PriceChartProps) {
+export function PriceChart({ market, openedAt }: PriceChartProps) {
   const { data, isLoading } = useQuery<{ cached: boolean; data: CoinGeckoResponse }>({
     queryKey: ["prices", market],
     queryFn: async () => {
@@ -76,6 +77,14 @@ export function PriceChart({ market }: PriceChartProps) {
               fill="url(#glow)"
               dot={false}
             />
+            {openedAt && openedAt > 0 && (
+              <ReferenceLine 
+                x={openedAt * 1000} 
+                stroke="#00ff9d" 
+                strokeDasharray="3 3"
+                label={{ position: "insideTopLeft", value: "Market Opened", fill: "#00ff9d", fontSize: 12 }} 
+              />
+            )}
           </AreaChart>
         </ResponsiveContainer>
       )}

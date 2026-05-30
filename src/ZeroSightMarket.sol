@@ -11,8 +11,8 @@ import {RedstoneConsumerNumericBase} from "@redstone-finance/evm-connector/contr
 /**
  * @title ZeroSightMarket
  * @notice Blind parimutuel prediction market secured by Story Protocol CDR.
- *         Users bet on Up/Down outcomes with encrypted choices.
- *         Winnings are auto-distributed by the owner after resolution — no claims needed.
+ *         Features Enterprise mechanics: 2% protocol fee, Time-Weighted Shares,
+ *         Anti-griefing distribution, and minimum bet limits.
  * @dev UUPS-upgradeable. Deploy behind an ERC1967Proxy.
  */
 contract ZeroSightMarket is
@@ -24,6 +24,11 @@ contract ZeroSightMarket is
 {
     using Address for address payable;
 
+    // ──────────────────────────── Constants ──────────────────────────
+
+    uint256 public constant MIN_BET = 1e16; // 0.01 IP
+    uint256 public constant PROTOCOL_FEE_PERCENT = 2; // 2%
+
     // ──────────────────────────── Enums ────────────────────────────
 
     enum MarketStatus {
@@ -32,7 +37,6 @@ contract ZeroSightMarket is
         Resolved
     }
 
-    /// @notice Future-proof category for expanding into Sports / Politics markets.
     enum MarketCategory {
         Crypto,
         Sports,
@@ -52,63 +56,61 @@ contract ZeroSightMarket is
 
     struct BetInfo {
         uint256 amount;
+        uint256 shares; // Calculated based on time-weighting (Multiplier 1x-2x)
         uint8 assetIndex;
         string vaultId;
-        uint8 direction; // Set later during reveal phase
-        bool choiceRevealed; // True once owner decrypts and submits
+        uint8 direction;
+        bool choiceRevealed;
         bool distributed;
         uint256 placedAt;
     }
 
+    struct MarketState {
+        MarketStatus status;
+        MarketCategory category;
+        uint256 totalPool;
+        uint256 openedAt; // Timestamp when market opened for time-weighting
+        uint256 deadline;
+        uint256 openingPrice;
+        uint256 resolvedPrice;
+        uint256 winningChoice; // 0 = Down, 1 = Up
+        uint256[2] totalSharesByChoice;
+        uint256 payoutPool; // totalPool - protocol fee
+        uint256 winningSharesTotal;
+        uint256 distributionIndex;
+        address[] bettors;
+    }
+
     // ──────────────────────────── State ────────────────────────────
 
-    /// @notice assetIndex => Redstone feed id  (0 = IP, 1 = BTC, 2 = ETH, …)
     mapping(uint8 => FeedConfig) private feedConfigs;
-
-    mapping(address => BetInfo[]) private userBets;
-
-    /// @notice Tracks every unique bettor for automatic distribution.
-    address[] private bettors;
-    mapping(address => bool) private hasBet;
+    mapping(uint8 => MarketState) public markets;
+    mapping(uint8 => mapping(address => BetInfo[])) private userBets;
+    mapping(uint8 => mapping(address => bool)) private hasBet;
 
     address[] private authorisedSigners;
     uint8 private uniqueSignersThreshold;
 
-    uint256 public totalPool;
-    MarketStatus public marketStatus;
-    MarketCategory public activeCategory;
-    uint8 public activeAsset;
-    uint256 public deadline;
-    uint256 public openingPrice;
-    uint256 public resolvedPrice;
-    uint256 public winningChoice; // 0 = Down, 1 = Up
-
-    uint256[2] public totalStakeByChoice;
-    uint256 public payoutPool;
-    uint256 public winningStakeTotal;
-
-    /// @notice Cursor into `bettors` array — tracks auto-distribution progress.
-    uint256 public distributionIndex;
-
     // ──────────────────────────── Events ───────────────────────────
 
     event BetPlaced(address indexed bettor, string vaultId, uint8 assetIndex, uint256 amount);
-    event ChoicesRevealed(uint256 count);
-    event MarketLocked(uint256 timestamp);
-    event MarketResolved(uint8 indexed assetIndex, uint256 resolvedPrice, uint256 winningChoice);
-    event WinningsDistributed(address indexed bettor, uint256 amount);
+    event ChoicesRevealed(uint8 indexed assetIndex, uint256 count);
+    event MarketLocked(uint8 indexed assetIndex, uint256 timestamp);
+    event MarketResolved(uint8 indexed assetIndex, uint256 resolvedPrice, uint256 winningChoice, uint256 feeTaken);
+    event WinningsDistributed(uint8 indexed assetIndex, address indexed bettor, uint256 amount);
+    event WinningsDistributionFailed(uint8 indexed assetIndex, address indexed bettor, uint256 amount);
     event FeedConfigUpdated(uint8 indexed assetIndex, bytes32 dataFeedId);
     event OracleConfigUpdated(uint8 uniqueSignersThreshold, address[] signers);
 
     // ──────────────────────────── Modifiers ────────────────────────
 
-    modifier onlyWhileOpen() {
-        require(marketStatus == MarketStatus.Open, "Market not open");
+    modifier onlyWhileOpen(uint8 assetIndex) {
+        require(markets[assetIndex].status == MarketStatus.Open, "Market not open");
         _;
     }
 
-    modifier onlyResolved() {
-        require(marketStatus == MarketStatus.Resolved, "Market not resolved");
+    modifier onlyResolved(uint8 assetIndex) {
+        require(markets[assetIndex].status == MarketStatus.Resolved, "Market not resolved");
         _;
     }
 
@@ -134,7 +136,6 @@ contract ZeroSightMarket is
         _setFeedConfig(1, btcFeedId); // asset 1 = BTC
         _setFeedConfig(2, ethFeedId); // asset 2 = ETH
 
-        // Default Redstone authorised signers (production set).
         address[] memory defaultSigners = new address[](5);
         defaultSigners[0] = 0x8BB8F32Df04c8b654987DAaeD53D6B6091e3B774;
         defaultSigners[1] = 0xdEB22f54738d54976C4c0fe5ce6d408E40d88499;
@@ -143,8 +144,9 @@ contract ZeroSightMarket is
         defaultSigners[4] = 0x9c5AE89C4Af6aA32cE58588DBaF90d18a855B6de;
         _updateOracleConfig(defaultSigners, 3);
 
-        marketStatus = MarketStatus.Resolved;
-        activeCategory = MarketCategory.Crypto;
+        markets[0].status = MarketStatus.Resolved;
+        markets[1].status = MarketStatus.Resolved;
+        markets[2].status = MarketStatus.Resolved;
     }
 
     // ──────────────────────────── UUPS ─────────────────────────────
@@ -157,30 +159,27 @@ contract ZeroSightMarket is
         revert("Direct payments disabled");
     }
 
-    /**
-     * @notice Place an encrypted bet on the active market.
-     * @param vaultId CDR vault UUID that holds the encrypted choice.
-     * @param assetIndex Must match `activeAsset`.
-     */
     function placeBet(
         string memory vaultId,
         uint8 assetIndex
-    ) external payable onlyWhileOpen {
+    ) external payable onlyWhileOpen(assetIndex) {
         require(bytes(vaultId).length > 0, "Vault required");
-        require(msg.value > 0, "Zero stake");
-        require(assetIndex == activeAsset, "Inactive asset");
-        require(block.timestamp < deadline, "Betting closed");
+        require(msg.value >= MIN_BET, "Min bet 0.01 IP");
+        
+        MarketState storage m = markets[assetIndex];
+        require(block.timestamp < m.deadline, "Betting closed");
 
-        totalPool += msg.value;
+        m.totalPool += msg.value;
 
-        if (!hasBet[msg.sender]) {
-            hasBet[msg.sender] = true;
-            bettors.push(msg.sender);
+        if (!hasBet[assetIndex][msg.sender]) {
+            hasBet[assetIndex][msg.sender] = true;
+            m.bettors.push(msg.sender);
         }
 
-        userBets[msg.sender].push(
+        userBets[assetIndex][msg.sender].push(
             BetInfo({
                 amount: msg.value,
+                shares: 0, // Calculated at reveal
                 assetIndex: assetIndex,
                 vaultId: vaultId,
                 direction: 0,
@@ -193,108 +192,115 @@ contract ZeroSightMarket is
         emit BetPlaced(msg.sender, vaultId, assetIndex, msg.value);
     }
 
-    /**
-     * @notice Reveal the decrypted choices for bettors.
-     * @dev Called by the owner off-chain after decrypting the CDR vaults.
-     *      Must be called before resolveMarket.
-     */
-    function revealChoices(address[] calldata bettorAddresses, string[] calldata vaultIds, uint8[] calldata choices) external onlyOwner {
-        require(marketStatus == MarketStatus.Locked || marketStatus == MarketStatus.Open, "Resolution blocked");
-        require(block.timestamp >= deadline, "Deadline not reached");
+    function revealChoices(
+        uint8 assetIndex,
+        address[] calldata bettorAddresses,
+        string[] calldata vaultIds,
+        uint8[] calldata choices
+    ) external onlyOwner {
+        MarketState storage m = markets[assetIndex];
+        require(m.status == MarketStatus.Locked || m.status == MarketStatus.Open, "Resolution blocked");
+        require(block.timestamp >= m.deadline, "Deadline not reached");
         require(bettorAddresses.length == choices.length && bettorAddresses.length == vaultIds.length, "Length mismatch");
 
-        if (marketStatus == MarketStatus.Open) {
-            marketStatus = MarketStatus.Locked;
-            emit MarketLocked(block.timestamp);
+        if (m.status == MarketStatus.Open) {
+            m.status = MarketStatus.Locked;
+            emit MarketLocked(assetIndex, block.timestamp);
         }
 
+        uint256 duration = m.deadline > m.openedAt ? m.deadline - m.openedAt : 1;
         uint256 revealedCount = 0;
+
         for (uint256 i = 0; i < bettorAddresses.length; i++) {
             address bettor = bettorAddresses[i];
             string calldata vaultId = vaultIds[i];
             uint8 choice = choices[i];
             require(choice <= 1, "Invalid choice");
 
-            BetInfo[] storage bets = userBets[bettor];
+            BetInfo[] storage bets = userBets[assetIndex][bettor];
             for (uint256 j = 0; j < bets.length; j++) {
                 BetInfo storage bet = bets[j];
-                // In a real production scenario with multiple rounds, we'd ensure
-                // we are only revealing the active round's bets. Here we reveal unrevealed ones.
-                if (!bet.choiceRevealed && bet.assetIndex == activeAsset && keccak256(bytes(bet.vaultId)) == keccak256(bytes(vaultId))) {
+                
+                if (!bet.choiceRevealed && bet.assetIndex == assetIndex && keccak256(bytes(bet.vaultId)) == keccak256(bytes(vaultId))) {
                     bet.direction = choice;
                     bet.choiceRevealed = true;
-                    totalStakeByChoice[choice] += bet.amount;
+                    
+                    // Time-weighted shares: Multiplier 1x (1000) to 2x (2000)
+                    uint256 timeLeft = m.deadline > bet.placedAt ? m.deadline - bet.placedAt : 0;
+                    uint256 multiplier = 1000 + ((1000 * timeLeft) / duration);
+                    bet.shares = (bet.amount * multiplier) / 1000;
+                    
+                    m.totalSharesByChoice[choice] += bet.shares;
                     revealedCount++;
                     break;
                 }
             }
         }
 
-        emit ChoicesRevealed(revealedCount);
+        emit ChoicesRevealed(assetIndex, revealedCount);
     }
 
-    /**
-     * @notice Lock the market once the deadline passes. Optional — resolveMarket auto-locks.
-     */
-    function lockMarket() external onlyOwner onlyWhileOpen {
-        require(block.timestamp >= deadline, "Deadline not reached");
-        marketStatus = MarketStatus.Locked;
-        emit MarketLocked(block.timestamp);
+    function lockMarket(uint8 assetIndex) external onlyOwner onlyWhileOpen(assetIndex) {
+        MarketState storage m = markets[assetIndex];
+        require(block.timestamp >= m.deadline, "Deadline not reached");
+        m.status = MarketStatus.Locked;
+        emit MarketLocked(assetIndex, block.timestamp);
     }
 
-    /**
-     * @notice Resolve the market by fetching the closing price from Redstone.
-     * @dev Must be called with a Redstone-wrapped transaction (WrapperBuilder).
-     */
-    function resolveMarket() external onlyOwner {
-        require(marketStatus != MarketStatus.Resolved, "Already resolved");
-        require(block.timestamp > deadline, "Resolution blocked");
-        require(openingPrice > 0, "Opening price missing");
+    function resolveMarket(uint8 assetIndex) external onlyOwner {
+        MarketState storage m = markets[assetIndex];
+        require(m.status != MarketStatus.Resolved, "Already resolved");
+        require(block.timestamp > m.deadline, "Resolution blocked");
+        require(m.openingPrice > 0, "Opening price missing");
 
-        if (marketStatus == MarketStatus.Open) {
-            marketStatus = MarketStatus.Locked;
-            emit MarketLocked(block.timestamp);
+        if (m.status == MarketStatus.Open) {
+            m.status = MarketStatus.Locked;
+            emit MarketLocked(assetIndex, block.timestamp);
         }
 
-        bytes32 feedId = feedConfigs[activeAsset].dataFeedId;
+        bytes32 feedId = feedConfigs[assetIndex].dataFeedId;
         require(feedId != bytes32(0), "Feed not configured");
 
         uint256 price = getOracleNumericValueFromTxMsg(feedId);
         require(price > 0, "Invalid oracle price");
 
-        resolvedPrice = price;
-        winningChoice = price >= openingPrice ? 1 : 0;
-        payoutPool = totalPool;
-        winningStakeTotal = totalStakeByChoice[winningChoice];
-        distributionIndex = 0;
-        marketStatus = MarketStatus.Resolved;
+        m.resolvedPrice = price;
+        m.winningChoice = price >= m.openingPrice ? 1 : 0;
+        
+        // Protocol Fee Deduction (2%)
+        uint256 fee = (m.totalPool * PROTOCOL_FEE_PERCENT) / 100;
+        m.payoutPool = m.totalPool - fee;
+        m.winningSharesTotal = m.totalSharesByChoice[m.winningChoice];
+        m.distributionIndex = 0;
+        m.status = MarketStatus.Resolved;
 
-        emit MarketResolved(activeAsset, price, winningChoice);
+        // Safely transfer fee to treasury/owner
+        if (fee > 0) {
+            m.totalPool -= fee;
+            (bool success, ) = owner().call{value: fee}("");
+            require(success, "Fee transfer failed");
+        }
+
+        emit MarketResolved(assetIndex, price, m.winningChoice, fee);
     }
 
     // ──────────────────────────── Auto-Distribution ────────────────
 
-    /**
-     * @notice Automatically distribute winnings to bettors in batches.
-     * @dev Called by the owner after resolution. Gas-safe — processes `batchSize` bettors per call.
-     *      If there are no winners (all bets on losing side), call `sweepUnclaimed` instead.
-     * @param batchSize Number of bettors to process in this call.
-     */
-    function distributeWinnings(uint256 batchSize) external onlyOwner nonReentrant onlyResolved {
-        require(distributionIndex < bettors.length, "Distribution complete");
+    function distributeWinnings(uint8 assetIndex, uint256 batchSize) external onlyOwner nonReentrant onlyResolved(assetIndex) {
+        MarketState storage m = markets[assetIndex];
+        require(m.distributionIndex < m.bettors.length, "Distribution complete");
 
-        uint256 end = distributionIndex + batchSize;
-        if (end > bettors.length) end = bettors.length;
+        uint256 end = m.distributionIndex + batchSize;
+        if (end > m.bettors.length) end = m.bettors.length;
 
-        if (winningStakeTotal == 0) {
-            // Edge case: no one picked the winning side — skip distribution, owner can sweep.
-            distributionIndex = end;
+        if (m.winningSharesTotal == 0) {
+            m.distributionIndex = end;
             return;
         }
 
-        for (uint256 i = distributionIndex; i < end; i++) {
-            address bettor = bettors[i];
-            BetInfo[] storage bets = userBets[bettor];
+        for (uint256 i = m.distributionIndex; i < end; i++) {
+            address bettor = m.bettors[i];
+            BetInfo[] storage bets = userBets[assetIndex][bettor];
 
             for (uint256 j = 0; j < bets.length; j++) {
                 BetInfo storage bet = bets[j];
@@ -302,98 +308,93 @@ contract ZeroSightMarket is
 
                 bet.distributed = true;
 
-                if (!bet.choiceRevealed || bet.direction != winningChoice) continue;
+                if (!bet.choiceRevealed || bet.direction != m.winningChoice) continue;
 
-                uint256 payout = (bet.amount * payoutPool) / winningStakeTotal;
-                if (payout > totalPool) payout = totalPool;
-                totalPool -= payout;
-
-                payable(bettor).sendValue(payout);
-                emit WinningsDistributed(bettor, payout);
+                uint256 payout = (bet.shares * m.payoutPool) / m.winningSharesTotal;
+                if (payout > m.totalPool) payout = m.totalPool;
+                
+                // Anti-Griefing safe push
+                (bool success, ) = bettor.call{value: payout}("");
+                if (success) {
+                    m.totalPool -= payout;
+                    emit WinningsDistributed(assetIndex, bettor, payout);
+                } else {
+                    emit WinningsDistributionFailed(assetIndex, bettor, payout);
+                    // Payout stays in m.totalPool and will be swept later
+                }
             }
         }
 
-        distributionIndex = end;
+        m.distributionIndex = end;
     }
 
-    /**
-     * @notice Returns true when all bettors have been processed.
-     */
-    function isFullyDistributed() external view returns (bool) {
-        return distributionIndex >= bettors.length;
+    function isFullyDistributed(uint8 assetIndex) external view returns (bool) {
+        return markets[assetIndex].distributionIndex >= markets[assetIndex].bettors.length;
     }
 
-    /**
-     * @notice Sweep any remaining dust to the owner (rounding leftovers, no-winner markets).
-     */
-    function sweepUnclaimed() external onlyOwner onlyResolved {
-        require(distributionIndex >= bettors.length, "Distribution pending");
-        uint256 remaining = address(this).balance;
-        if (remaining > 0) {
-            payable(owner()).sendValue(remaining);
+    function sweepUnclaimed(uint8 assetIndex) external onlyOwner onlyResolved(assetIndex) {
+        MarketState storage m = markets[assetIndex];
+        require(m.distributionIndex >= m.bettors.length, "Distribution pending");
+        uint256 remainingPool = m.totalPool;
+        if (remainingPool > 0) {
+            m.totalPool = 0;
+            (bool success, ) = owner().call{value: remainingPool}("");
+            require(success, "Sweep failed");
         }
-        totalPool = 0;
     }
 
     // ──────────────────────────── Market Lifecycle ─────────────────
 
-    /**
-     * @notice Start a new market round.
-     * @dev Requires the previous round to be fully resolved and distributed.
-     *      Must be a Redstone-wrapped transaction to fetch the opening price.
-     * @param category   Market category (Crypto for now, Sports/Politics later).
-     * @param assetIndex Which asset feed to use (0=IP, 1=BTC, 2=ETH).
-     * @param newDeadline Unix timestamp when betting closes.
-     */
     function startNextMarket(
         MarketCategory category,
         uint8 assetIndex,
         uint256 newDeadline
     ) external onlyOwner {
-        require(marketStatus == MarketStatus.Resolved, "Market not settled");
-        require(distributionIndex >= bettors.length, "Distribution pending");
+        MarketState storage m = markets[assetIndex];
+        
+        require(m.status == MarketStatus.Resolved, "Market not settled");
+        require(m.distributionIndex >= m.bettors.length, "Distribution pending");
         require(newDeadline > block.timestamp, "Invalid deadline");
 
         bytes32 feedId = feedConfigs[assetIndex].dataFeedId;
         require(feedId != bytes32(0), "Feed not configured");
 
-        // Reset bettor state from previous round.
-        for (uint256 i = 0; i < bettors.length; i++) {
-            delete userBets[bettors[i]];
-            delete hasBet[bettors[i]];
+        for (uint256 i = 0; i < m.bettors.length; i++) {
+            delete userBets[assetIndex][m.bettors[i]];
+            delete hasBet[assetIndex][m.bettors[i]];
         }
-        delete bettors;
+        delete m.bettors;
 
         uint256[2] memory empty;
-        totalStakeByChoice = empty;
-        totalPool = 0;
-        payoutPool = 0;
-        winningStakeTotal = 0;
-        resolvedPrice = 0;
-        winningChoice = 0;
-        distributionIndex = 0;
+        m.totalSharesByChoice = empty;
+        m.totalPool = 0;
+        m.payoutPool = 0;
+        m.winningSharesTotal = 0;
+        m.resolvedPrice = 0;
+        m.winningChoice = 0;
+        m.distributionIndex = 0;
 
-        openingPrice = getOracleNumericValueFromTxMsg(feedId);
-        require(openingPrice > 0, "Invalid opening price");
+        m.openingPrice = getOracleNumericValueFromTxMsg(feedId);
+        require(m.openingPrice > 0, "Invalid opening price");
 
-        activeCategory = category;
-        activeAsset = assetIndex;
-        deadline = newDeadline;
-        marketStatus = MarketStatus.Open;
+        m.category = category;
+        m.openedAt = block.timestamp;
+        m.deadline = newDeadline;
+        m.status = MarketStatus.Open;
     }
 
     // ──────────────────────────── View Helpers ─────────────────────
 
-    function getUserBets(address bettor) external view returns (BetInfo[] memory) {
-        return userBets[bettor];
+    function getUserBets(uint8 assetIndex, address bettor) external view returns (BetInfo[] memory) {
+        return userBets[assetIndex][bettor];
     }
 
     function getFeedConfig(uint8 assetIndex) external view returns (FeedConfig memory) {
         return feedConfigs[assetIndex];
     }
 
-    function getBettorCount() external view returns (uint256) {
-        return bettors.length;
+    function getBettorCount(uint8 assetIndex) external view returns (uint256) {
+        return markets[assetIndex].bettors.length;
     }
 
     function getOracleSigners() external view returns (address[] memory) {
