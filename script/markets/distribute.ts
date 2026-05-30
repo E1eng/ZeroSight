@@ -9,7 +9,7 @@ const DEFAULT_BATCH_SIZE = 50;
 async function main() {
   const rpcUrl = requireEnv("STORY_RPC_URL");
   const privateKey = process.env.MARKET_OPERATOR_PRIVATE_KEY ?? requireEnv("DEPLOYER_PRIVATE_KEY");
-  const contractAddress = requireEnv("ZERO_SIGHT_MARKET_ADDRESS");
+  const contractAddress = requireEnv("NEXT_PUBLIC_ZERO_SIGHT_MARKET_ADDRESS");
 
   const assetInput = (process.argv[2] ?? process.env.MARKET_ASSET ?? "ip").toLowerCase();
   const assetLabels: Record<string, number> = { ip: 0, btc: 1, eth: 2 };

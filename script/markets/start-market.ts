@@ -24,8 +24,7 @@ async function main() {
     );
   }
 
-  const envKey = `NEXT_PUBLIC_${assetInput.toUpperCase()}_MARKET_ADDRESS`;
-  const contractAddress = requireEnv(envKey);
+  const contractAddress = requireEnv("NEXT_PUBLIC_ZERO_SIGHT_MARKET_ADDRESS");
 
   // Parse category — defaults to "crypto".
   const categoryInput = (process.argv[3] ?? process.env.MARKET_CATEGORY ?? "crypto").toLowerCase();
@@ -56,10 +55,13 @@ async function main() {
     `Starting market: asset=${assetInput}(${assetIndex}) category=${categoryInput}(${category}) deadline=${deadline}`
   );
 
+  const authorizedSigners = await contract.getOracleSigners();
+
   const wrapped = WrapperBuilder.wrap(contract).usingDataService({
     dataServiceId,
     uniqueSignersCount,
-    dataFeeds: [dataFeedId]
+    dataPackagesIds: [dataFeedId],
+    authorizedSigners
   } as any);
 
   const tx = await wrapped.startNextMarket(category, assetIndex, deadline);

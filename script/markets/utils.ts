@@ -8,7 +8,8 @@ export const MARKET_ABI = [
   "function isFullyDistributed(uint8 assetIndex) view returns (bool)",
   "function getBettorCount(uint8 assetIndex) view returns (uint256)",
   "function markets(uint8 assetIndex) view returns (uint8 status, uint8 category, uint256 totalPool, uint256 openedAt, uint256 deadline, uint256 openingPrice, uint256 resolvedPrice, uint256 winningChoice, uint256 payoutPool, uint256 winningSharesTotal, uint256 distributionIndex)",
-  "function getUserBets(uint8 assetIndex, address bettor) view returns (tuple(uint256 amount, uint256 shares, uint8 assetIndex, string vaultId, uint8 direction, bool choiceRevealed, bool distributed, uint256 placedAt)[])"
+  "function getUserBets(uint8 assetIndex, address bettor) view returns (tuple(uint256 amount, uint256 shares, uint8 assetIndex, string vaultId, uint8 direction, bool choiceRevealed, bool distributed, uint256 placedAt)[])",
+  "function getOracleSigners() view returns (address[])"
 ];
 
 export type MarketCategory = 0 | 1 | 2; // Crypto | Sports | Politics
@@ -27,7 +28,7 @@ export const ASSET_LABELS: Record<string, AssetIndex> = {
 };
 
 export const FEED_IDS: Record<AssetIndex, string> = {
-  0: "STORY_IP",
+  0: "IP",
   1: "BTC",
   2: "ETH"
 };

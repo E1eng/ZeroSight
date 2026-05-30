@@ -8,7 +8,7 @@ import { FEED_IDS, MARKET_ABI, STATUS_LABELS, requireEnv, type AssetIndex } from
 async function main() {
   const rpcUrl = requireEnv("STORY_RPC_URL");
   const privateKey = process.env.MARKET_OPERATOR_PRIVATE_KEY ?? requireEnv("DEPLOYER_PRIVATE_KEY");
-  const contractAddress = requireEnv("ZERO_SIGHT_MARKET_ADDRESS");
+  const contractAddress = requireEnv("NEXT_PUBLIC_ZERO_SIGHT_MARKET_ADDRESS");
 
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(privateKey, provider);
@@ -35,12 +35,13 @@ async function main() {
   const dataServiceId = process.env.REDSTONE_DATA_SERVICE_ID ?? "redstone-primary-prod";
   const uniqueSignersCount = Number(process.env.REDSTONE_SIGNERS_THRESHOLD ?? "3");
 
-  console.log(`Resolving market: asset=${assetIndex} status=${STATUS_LABELS[status] ?? status}`);
+  const authorizedSigners = await contract.getOracleSigners();
 
   const wrapped = WrapperBuilder.wrap(contract).usingDataService({
     dataServiceId,
     uniqueSignersCount,
-    dataFeeds: [dataFeedId]
+    dataPackagesIds: [dataFeedId],
+    authorizedSigners
   } as any);
 
   const tx = await wrapped.resolveMarket(assetIndex);

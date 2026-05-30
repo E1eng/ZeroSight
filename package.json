@@ -11,7 +11,8 @@
     "format:fix": "prettier --write .",
     "prepare": "husky install",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "keeper": "npx tsx script/markets/keeper-bot.ts"
   },
   "dependencies": {
     "@headlessui/react": "^1.7.18",

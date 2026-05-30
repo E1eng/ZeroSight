@@ -7,7 +7,7 @@ import { MARKET_ABI, requireEnv } from "./utils";
 const execAsync = promisify(exec);
 
 const rpcUrl = requireEnv("STORY_RPC_URL");
-const contractAddress = requireEnv("ZERO_SIGHT_MARKET_ADDRESS");
+const contractAddress = requireEnv("NEXT_PUBLIC_ZERO_SIGHT_MARKET_ADDRESS");
 
 const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
 const contract = new ethers.Contract(contractAddress, MARKET_ABI, provider);
@@ -46,7 +46,7 @@ async function checkAsset(asset: string, assetIndex: number) {
         const isDistributed = await contract.isFullyDistributed(assetIndex);
         if (!isDistributed) {
           console.log(`[${asset.toUpperCase()}] Market resolved but not fully distributed. Distributing...`);
-          await runScript(`Distribute Winnings (${asset})`, `npx ts-node script/markets/distribute.ts ${asset}`);
+          await runScript(`Distribute Winnings (${asset})`, `npx tsx script/markets/distribute.ts ${asset}`);
           return;
         }
       }
@@ -72,7 +72,7 @@ async function checkAsset(asset: string, assetIndex: number) {
       
       console.log(`[${asset.toUpperCase()}] Starting new market. Deadline set to ${targetDate.toLocaleTimeString()} (Offset: ${offsetSeconds}s)`);
       // Start market defaulting to crypto category
-      await runScript(`Start Market (${asset})`, `npx ts-node script/markets/start-market.ts ${asset} crypto ${offsetSeconds}`);
+      await runScript(`Start Market (${asset})`, `npx tsx script/markets/start-market.ts ${asset} crypto ${offsetSeconds}`);
       return;
     }
 
@@ -82,7 +82,7 @@ async function checkAsset(asset: string, assetIndex: number) {
         console.log(`[${asset.toUpperCase()}] Deadline passed (${now} > ${deadline}). Locking and revealing choices...`);
         const revealSuccess = await runScript(
           `Reveal Choices (${asset})`,
-          `npx ts-node script/markets/reveal-choices.ts ${asset}`
+          `npx tsx script/markets/reveal-choices.ts ${asset}`
         );
         if (!revealSuccess) {
           console.error(`[${asset.toUpperCase()}] Reveal failed. Aborting cycle.`);
@@ -98,10 +98,10 @@ async function checkAsset(asset: string, assetIndex: number) {
         
         const resolveSuccess = await runScript(
           `Resolve Market (${asset})`,
-          `npx ts-node script/markets/resolve-market.ts ${asset}`
+          `npx tsx script/markets/resolve-market.ts ${asset}`
         );
         if (resolveSuccess) {
-          await runScript(`Distribute Winnings (${asset})`, `npx ts-node script/markets/distribute.ts ${asset}`);
+          await runScript(`Distribute Winnings (${asset})`, `npx tsx script/markets/distribute.ts ${asset}`);
         }
       } else {
         console.log(`[${asset.toUpperCase()}] Market Locked. Waiting for resolution time (in ${RESOLVE_TIME - now} seconds)...`);

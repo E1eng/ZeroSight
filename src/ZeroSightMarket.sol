@@ -149,6 +149,13 @@ contract ZeroSightMarket is
         markets[2].status = MarketStatus.Resolved;
     }
 
+
+    function setFeedConfig(uint8 assetIndex, bytes32 feedId) external onlyOwner {
+        feedConfigs[assetIndex].dataFeedId = feedId;
+        emit FeedConfigUpdated(assetIndex, feedId);
+    }
+
+
     // ──────────────────────────── UUPS ─────────────────────────────
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
@@ -352,7 +359,7 @@ contract ZeroSightMarket is
     ) external onlyOwner {
         MarketState storage m = markets[assetIndex];
         
-        require(m.status == MarketStatus.Resolved, "Market not settled");
+        require(m.status == MarketStatus.Resolved || m.deadline == 0, "Market not settled");
         require(m.distributionIndex >= m.bettors.length, "Distribution pending");
         require(newDeadline > block.timestamp, "Invalid deadline");
 
