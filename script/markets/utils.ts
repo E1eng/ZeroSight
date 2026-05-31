@@ -7,13 +7,13 @@ export const MARKET_ABI = [
   "function lockMarket(uint8 assetIndex) external",
   "function isFullyDistributed(uint8 assetIndex) view returns (bool)",
   "function getBettorCount(uint8 assetIndex) view returns (uint256)",
+  "function getBettors(uint8 assetIndex) view returns (address[])",
   "function markets(uint8 assetIndex) view returns (uint8 status, uint8 category, uint256 totalPool, uint256 openedAt, uint256 deadline, uint256 openingPrice, uint256 resolvedPrice, uint256 winningChoice, uint256 payoutPool, uint256 winningSharesTotal, uint256 distributionIndex)",
-  "function getUserBets(uint8 assetIndex, address bettor) view returns (tuple(uint256 amount, uint256 shares, uint8 assetIndex, string vaultId, uint8 direction, bool choiceRevealed, bool distributed, uint256 placedAt)[])",
   "function getOracleSigners() view returns (address[])"
 ];
 
 export type MarketCategory = 0 | 1 | 2; // Crypto | Sports | Politics
-export type AssetIndex = 0 | 1 | 2; // IP | BTC | ETH
+export type AssetIndex = 0 | 1 | 2 | 3 | 4 | 5; // Hourly: IP, BTC, ETH | Daily: IP, BTC, ETH
 
 export const CATEGORY_LABELS: Record<string, MarketCategory> = {
   crypto: 0,
@@ -24,13 +24,19 @@ export const CATEGORY_LABELS: Record<string, MarketCategory> = {
 export const ASSET_LABELS: Record<string, AssetIndex> = {
   ip: 0,
   btc: 1,
-  eth: 2
+  eth: 2,
+  ip_daily: 3,
+  btc_daily: 4,
+  eth_daily: 5
 };
 
 export const FEED_IDS: Record<AssetIndex, string> = {
   0: "IP",
   1: "BTC",
-  2: "ETH"
+  2: "ETH",
+  3: "IP",
+  4: "BTC",
+  5: "ETH"
 };
 
 export const STATUS_LABELS: Record<number, string> = {

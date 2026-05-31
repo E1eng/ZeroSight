@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
-import { type MarketKey, MARKET_METADATA } from "@/lib/markets";
+import { type MarketKey, MARKET_METADATA, getTargetPrice, formatTargetPrice } from "@/lib/markets";
+import { getMarketState } from "@/lib/market-contract";
 
 interface MarketCardProps {
   marketId: MarketKey;
@@ -15,14 +16,64 @@ export function MarketCard({ marketId }: MarketCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [betDirection, setBetDirection] = useState<'up' | 'down'>('up');
   const [betAmount, setBetAmount] = useState("10");
+  const [timeLeft, setTimeLeft] = useState<number>(0);
+  const [status, setStatus] = useState<number>(0);
+  const [openingPrice, setOpeningPrice] = useState<number>(0);
 
   const meta = MARKET_METADATA[marketId];
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    let pollInterval: NodeJS.Timeout;
+
+    async function updateTimer() {
+      try {
+        const state = await getMarketState(meta.assetIndex);
+        setStatus(state.status);
+        setOpeningPrice(state.openingPrice || 0);
+        const deadline = state.deadline || 0;
+        
+        const tick = () => {
+          const now = Math.floor(Date.now() / 1000);
+          const diff = deadline - now;
+          setTimeLeft(diff > 0 ? diff : 0);
+        };
+        
+        tick();
+        if (timer) clearInterval(timer);
+        timer = setInterval(tick, 1000);
+      } catch (err) {
+        console.error("Failed to load market state for card:", err);
+      }
+    }
+
+    updateTimer();
+    pollInterval = setInterval(updateTimer, 8000); // poll state every 8s
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(pollInterval);
+    };
+  }, [meta.assetIndex]);
+
+  const timeRemainingText = (() => {
+    if (status === 1) return "Locked";
+    if (status === 2) return "Resolved";
+    if (timeLeft <= 0) return "Closed";
+    const minutes = Math.floor(timeLeft / 60);
+    const seconds = timeLeft % 60;
+    return `${minutes}m ${seconds}s left`;
+  })();
+
+  const cleanLabel = meta.label.replace(" (Daily)", "");
+  const tags = ["CRYPTO", cleanLabel, meta.durationLabel.toUpperCase()];
   
-  // Hardcoded for demo to match image, but in reality we'd pull from contract/metadata
-  const timeRemaining = "29m left";
-  const tags = ["CRYPTO", meta.label];
-  
-  const title = `${meta.label} direction for the next 24h?`;
+  const targetPrice = openingPrice ? getTargetPrice(meta.assetIndex, openingPrice) : 0;
+  const targetPriceFormatted = targetPrice > 0 ? formatTargetPrice(meta.assetIndex, targetPrice) : "";
+
+  const title = targetPriceFormatted
+    ? `Will ${cleanLabel} close above ${targetPriceFormatted}?`
+    : `${cleanLabel} direction ${meta.durationLabel === "Hourly" ? "for this hour?" : "for today?"}`;
 
   const openQuickBet = (e: React.MouseEvent, direction: 'up' | 'down') => {
     e.preventDefault();
@@ -34,6 +85,7 @@ export function MarketCard({ marketId }: MarketCardProps) {
     setBetAmount("10");
     setIsModalOpen(true);
   };
+
 
   const confirmBet = () => {
     setIsModalOpen(false);
@@ -58,13 +110,13 @@ export function MarketCard({ marketId }: MarketCardProps) {
               </span>
             ))}
           </div>
-          <span className="text-xs font-bold text-rose-500">{timeRemaining}</span>
+          <span className="text-xs font-bold text-rose-500">{timeRemainingText}</span>
         </div>
 
         {/* Asset / Title */}
         <div className="mb-6 flex flex-col items-center gap-3 text-center transition group-hover:scale-105">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#1A1A1A] text-xl font-bold text-white shadow-inner">
-            {meta.label === "IP" ? "IP" : meta.label === "BTC" ? "₿" : "Ξ"}
+            {cleanLabel === "IP" ? "IP" : cleanLabel === "BTC" ? "₿" : "Ξ"}
           </div>
           <h3 className="text-sm font-semibold text-zinc-100 sm:text-base">
             {title}
@@ -128,10 +180,10 @@ export function MarketCard({ marketId }: MarketCardProps) {
           
           <div className="mb-6 flex flex-col items-center gap-3 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#1A1A1A] text-xl font-bold text-white shadow-inner">
-              {meta.label === "IP" ? "IP" : meta.label === "BTC" ? "₿" : "Ξ"}
+              {cleanLabel === "IP" ? "IP" : cleanLabel === "BTC" ? "₿" : "Ξ"}
             </div>
             <p className="text-sm font-semibold text-zinc-300">
-              {meta.label} direction for the next 24h?
+              {title}
             </p>
           </div>
 

@@ -91,6 +91,8 @@ export async function getMarketState(assetIndex: AssetIndex) {
   return {
     status: Number(marketData[0]),
     totalPool: marketData[2] as bigint,
-    openedAt: Number(marketData[3])
+    openedAt: Number(marketData[3]),
+    deadline: Number(marketData[4]),
+    openingPrice: Number(marketData[5])
   };
 }

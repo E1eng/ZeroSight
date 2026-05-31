@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { ethers } from "ethers";
 
-import { MARKET_ABI, requireEnv } from "./utils";
+import { MARKET_ABI, requireEnv, ASSET_LABELS } from "./utils";
 
 const DEFAULT_BATCH_SIZE = 50;
 
@@ -12,8 +12,7 @@ async function main() {
   const contractAddress = requireEnv("NEXT_PUBLIC_ZERO_SIGHT_MARKET_ADDRESS");
 
   const assetInput = (process.argv[2] ?? process.env.MARKET_ASSET ?? "ip").toLowerCase();
-  const assetLabels: Record<string, number> = { ip: 0, btc: 1, eth: 2 };
-  const assetIndex = assetLabels[assetInput];
+  const assetIndex = ASSET_LABELS[assetInput];
   if (assetIndex === undefined) throw new Error(`Unknown asset: ${assetInput}`);
 
   const batchSize = Number(process.argv[3] ?? DEFAULT_BATCH_SIZE);

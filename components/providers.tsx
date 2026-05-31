@@ -4,6 +4,8 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PropsWithChildren, useMemo, useState } from "react";
 
+import { STORY_TESTNET_CHAIN } from "@/lib/story";
+
 const DEFAULT_PRIVY_APP_ID = "PRIVY_APP_ID_PLACEHOLDER";
 
 export function Providers({ children }: PropsWithChildren) {
@@ -15,7 +17,14 @@ export function Providers({ children }: PropsWithChildren) {
   }
 
   return (
-    <PrivyProvider appId={appId} config={{ appearance: { theme: "dark" } }}>
+    <PrivyProvider
+      appId={appId}
+      config={{
+        appearance: { theme: "dark" },
+        supportedChains: [STORY_TESTNET_CHAIN],
+        defaultChain: STORY_TESTNET_CHAIN
+      }}
+    >
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </PrivyProvider>
   );

@@ -14,7 +14,7 @@ const contract = new ethers.Contract(contractAddress, MARKET_ABI, provider);
 
 const CHECK_INTERVAL_MS = 15000; // Every 15 seconds
 
-const ASSETS = ["ip", "btc", "eth"];
+const ASSETS = ["ip", "btc", "eth", "ip_daily", "btc_daily", "eth_daily"];
 
 async function runScript(name: string, command: string) {
   console.log(`\n--- Running ${name} ---`);
@@ -51,26 +51,34 @@ async function checkAsset(asset: string, assetIndex: number) {
         }
       }
 
-      // PHASE 1: Market is settled. Start next hourly round automatically.
+      // PHASE 1: Market is settled. Start next round automatically.
       const d = new Date();
-      let targetHour = d.getHours();
-      
-      // If we're already past minute 50, schedule for the next hour's 50th minute
-      if (d.getMinutes() >= 50) {
-        targetHour += 1;
+      let targetUnix = 0;
+      let targetDate: Date;
+
+      if (assetIndex < 3) {
+        // Hourly schedule (closes at minute 50)
+        let targetHour = d.getHours();
+        if (d.getMinutes() >= 50) {
+          targetHour += 1;
+        }
+        targetDate = new Date(d.getFullYear(), d.getMonth(), d.getDate(), targetHour, 50, 0, 0);
+        targetUnix = Math.floor(targetDate.getTime() / 1000);
+      } else {
+        // Daily schedule (closes at 23:50 / 11:50 PM)
+        targetDate = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 50, 0, 0);
+        if (d.getTime() >= targetDate.getTime()) {
+          targetDate.setDate(targetDate.getDate() + 1);
+        }
+        targetUnix = Math.floor(targetDate.getTime() / 1000);
       }
       
-      // Set deadline exactly to the 50th minute of the target hour
-      const targetDate = new Date(d.getFullYear(), d.getMonth(), d.getDate(), targetHour, 50, 0, 0);
-      const targetUnix = Math.floor(targetDate.getTime() / 1000);
-      
-      // Fallback safeguard just in case
       let offsetSeconds = targetUnix - now;
       if (offsetSeconds <= 0) {
-        offsetSeconds = 3000; // default 50 mins
+        offsetSeconds = assetIndex < 3 ? 3000 : 86400; // fallback
       }
       
-      console.log(`[${asset.toUpperCase()}] Starting new market. Deadline set to ${targetDate.toLocaleTimeString()} (Offset: ${offsetSeconds}s)`);
+      console.log(`[${asset.toUpperCase()}] Starting new market. Deadline set to ${targetDate.toLocaleString()} (Offset: ${offsetSeconds}s)`);
       // Start market defaulting to crypto category
       await runScript(`Start Market (${asset})`, `npx tsx script/markets/start-market.ts ${asset} crypto ${offsetSeconds}`);
       return;
@@ -115,8 +123,10 @@ async function checkAsset(asset: string, assetIndex: number) {
 }
 
 async function checkAndExecute() {
-  // Check all assets concurrently
-  await Promise.all(ASSETS.map((asset, index) => checkAsset(asset, index)));
+  // Check all assets sequentially to avoid nonce collisions in child processes
+  for (let index = 0; index < ASSETS.length; index++) {
+    await checkAsset(ASSETS[index], index);
+  }
 }
 
 async function main() {

@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 
 import { PriceChart } from "@/components/price-chart";
 import { MarketStatusDisplay } from "@/components/market-status";
-import { MARKET_METADATA, type MarketKey, MARKET_LIST } from "@/lib/markets";
+import { MARKET_METADATA, type MarketKey, MARKET_LIST, getTargetPrice, formatTargetPrice } from "@/lib/markets";
 import { createCdrClient, encryptPayload } from "@/lib/cdr";
 import { placeBetOnChain, getMarketState } from "@/lib/market-contract";
 import { STORY_CAIP_ID, STORY_CHAIN_ID } from "@/lib/story";
@@ -23,6 +24,49 @@ export default function MarketPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const market = (MARKET_LIST.includes(params.id as MarketKey) ? params.id : "ip") as MarketKey;
   
+  const activeMetadata = useMemo(() => MARKET_METADATA[market], [market]);
+  const cleanLabel = useMemo(() => activeMetadata.label.replace(" (Daily)", ""), [activeMetadata.label]);
+
+  // Fetch historical price trend line (staleTime 60s is fine for chart)
+  const { data: priceData } = useQuery<{ cached: boolean; data: { prices: [number, number][] } }>({
+    queryKey: ["prices", market],
+    queryFn: async () => {
+      const res = await fetch(`/api/prices?market=${market}`);
+      if (!res.ok) {
+        throw new Error("Failed to load prices");
+      }
+      return res.json();
+    },
+    staleTime: 60_000
+  });
+
+  // Fetch real-time Redstone Oracle price feed (polls every 5s)
+  const { data: oraclePriceData } = useQuery<{ price: number; timestamp: number }>({
+    queryKey: ["oracle-price", cleanLabel],
+    queryFn: async () => {
+      const res = await fetch(`/api/oracle-price?symbol=${cleanLabel}`);
+      if (!res.ok) {
+        throw new Error("Failed to load oracle price");
+      }
+      return res.json();
+    },
+    refetchInterval: 5000,
+    staleTime: 4000
+  });
+
+  const latestPrice = oraclePriceData?.price ?? null;
+
+  const latestPriceFormatted = useMemo(() => {
+    if (latestPrice === null) return "Loading…";
+    if (activeMetadata.assetIndex === 0 || activeMetadata.assetIndex === 3) {
+      return `$${latestPrice.toFixed(4)}`;
+    }
+    return `$${latestPrice.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  }, [latestPrice, activeMetadata.assetIndex]);
+
   const [showDetails, setShowDetails] = useState(false);
   
   const [direction, setDirection] = useState<(typeof directions)[number]["value"]>(
@@ -31,10 +75,23 @@ export default function MarketPage({ params }: { params: { id: string } }) {
   const [amount, setAmount] = useState(0.1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [marketState, setMarketState] = useState<{ status: number; openedAt: number }>({
+  const [marketState, setMarketState] = useState<{ status: number; openedAt: number; openingPrice: number; deadline: number }>({
     status: 0,
-    openedAt: 0
+    openedAt: 0,
+    openingPrice: 0,
+    deadline: 0
   });
+
+  const [currentTime, setCurrentTime] = useState<number>(Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const isClosed = marketState.status !== 0 || (marketState.deadline > 0 && currentTime >= marketState.deadline);
+
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
 
@@ -51,15 +108,19 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     async function checkStatus() {
       try {
         const state = await getMarketState(activeMetadata.assetIndex);
-        setMarketState({ status: state.status as number, openedAt: state.openedAt });
+        setMarketState({ 
+          status: state.status as number, 
+          openedAt: state.openedAt,
+          openingPrice: state.openingPrice || 0,
+          deadline: state.deadline || 0
+        });
       } catch (e) {}
     }
     checkStatus();
     interval = setInterval(checkStatus, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeMetadata.assetIndex]);
 
-  const activeMetadata = useMemo(() => MARKET_METADATA[market], [market]);
   const connectedWallet = useMemo(() => {
     if (!wallets.length) return null;
     return wallets.find((wallet: any) => wallet.chainId === STORY_CAIP_ID) ?? wallets[0];
@@ -79,6 +140,10 @@ export default function MarketPage({ params }: { params: { id: string } }) {
   }, [primaryWallet]);
 
   const handleBet = useCallback(async () => {
+    if (isClosed) {
+      setStatusMessage("Market is closed for betting.");
+      return;
+    }
     if (!authenticated) {
       await login();
       return;
@@ -178,6 +243,13 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     addBet
   ]);
 
+  const targetPrice = marketState.openingPrice ? getTargetPrice(activeMetadata.assetIndex, marketState.openingPrice) : 0;
+  const targetPriceFormatted = targetPrice > 0 ? formatTargetPrice(activeMetadata.assetIndex, targetPrice) : "";
+
+  const title = targetPriceFormatted
+    ? `Will ${cleanLabel} close above ${targetPriceFormatted}?`
+    : `${cleanLabel} direction ${activeMetadata.durationLabel === "Hourly" ? "for this hour?" : "for today?"}`;
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col px-6 py-8 lg:px-12">
       <div className="mb-8">
@@ -190,18 +262,15 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#1A1A1A] text-3xl font-bold text-white shadow-inner">
-              {activeMetadata.label === "IP" ? "IP" : activeMetadata.label === "BTC" ? "₿" : "Ξ"}
+              {cleanLabel === "IP" ? "IP" : cleanLabel === "BTC" ? "₿" : "Ξ"}
             </div>
             <div className="flex flex-col gap-2">
               <h1 className="text-3xl font-bold text-white">
-                {activeMetadata.label} direction for the next 24h?
+                {title}
               </h1>
               <div className="flex items-center gap-3 text-xs font-bold">
                 <span className="rounded bg-neon px-2 py-1 text-black">ACTIVE</span>
-                <span className="text-zinc-400">CRYPTO</span>
-                <span className="flex items-center gap-1 text-blue-400">
-                  <span>⚙</span> Auto-Resolution
-                </span>
+                <span className="text-zinc-500">{activeMetadata.durationLabel} Prediction Cycle</span>
               </div>
             </div>
           </div>
@@ -220,17 +289,35 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           
           {showDetails && (
             <div className="mt-4 flex flex-col gap-4 rounded-xl bg-[#141414] p-6 text-sm text-zinc-400">
-              <p>24-hour binary market.</p>
+              <p>
+                {activeMetadata.durationLabel === "Hourly"
+                  ? "Hourly binary prediction market. Closes for betting at minute 50 and resolves at minute 60 of the hour."
+                  : "Daily binary prediction market. Closes for betting at 23:50 (11:50 PM) and resolves at 00:00 (midnight) of the next day."}
+              </p>
               
               <p>
-                Resolves UP if the {activeMetadata.label} price increases above current price at resolution time, 
+                Resolves UP if the {cleanLabel} price increases by at least the target percentage relative to the opening price at resolution time, 
                 or DOWN if at or below.
               </p>
               
-              <ul className="list-inside list-disc space-y-1">
-                <li>UP wins if price &gt; current</li>
-                <li>DOWN wins if price ≤ current</li>
-              </ul>
+              <div className="rounded-lg bg-white/5 p-3 text-xs">
+                <span className="mb-2 block font-bold text-zinc-300">Target Price Rules ({activeMetadata.durationLabel} Volatility standard):</span>
+                <ul className="list-inside list-disc space-y-1">
+                  {activeMetadata.durationLabel === "Hourly" ? (
+                    <>
+                      <li><strong>IP Target</strong>: UP if price increases by at least <strong>0.75%</strong></li>
+                      <li><strong>BTC Target</strong>: UP if price increases by at least <strong>0.25%</strong></li>
+                      <li><strong>ETH Target</strong>: UP if price increases by at least <strong>0.40%</strong></li>
+                    </>
+                  ) : (
+                    <>
+                      <li><strong>IP Target</strong>: UP if price increases by at least <strong>4.00%</strong></li>
+                      <li><strong>BTC Target</strong>: UP if price increases by at least <strong>1.50%</strong></li>
+                      <li><strong>ETH Target</strong>: UP if price increases by at least <strong>2.50%</strong></li>
+                    </>
+                  )}
+                </ul>
+              </div>
               
               <p>
                 Resolution source: Redstone Oracles on Story Aeneid Testnet ({activeMetadata.feedAddress}).<br />
@@ -272,24 +359,45 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         </div>
       </div>
       
-      <main className="grid flex-1 gap-12 lg:grid-cols-[1.2fr_1fr]">
-        <section className="space-y-6">
+      <main className="grid flex-1 gap-12 lg:grid-cols-[1.2fr_1fr] min-w-0">
+        <section className="space-y-6 min-w-0">
           <div className="rounded-3xl border border-white/5 bg-[#141414] p-6">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-col gap-1">
                 <span className="text-sm font-bold text-zinc-200">
-                  {activeMetadata.label}/USD <span className="text-neon">● LIVE</span>
+                  {cleanLabel}/USD <span className="text-neon animate-pulse">● LIVE</span>
+                </span>
+                <span className="text-3xl font-mono font-bold text-white tracking-tight mt-1">
+                  {latestPriceFormatted}
                 </span>
               </div>
-              <MarketStatusDisplay />
+              <MarketStatusDisplay assetIndex={activeMetadata.assetIndex} />
             </div>
+
+            {marketState.openingPrice > 0 && (
+              <div className="mb-6 grid grid-cols-2 gap-4 rounded-2xl border border-white/5 bg-white/5 p-4 text-xs font-semibold">
+                <div>
+                  <span className="block text-zinc-500 uppercase tracking-wider mb-1">Opening Price</span>
+                  <span className="font-mono text-sm text-zinc-300">
+                    {formatTargetPrice(activeMetadata.assetIndex, marketState.openingPrice / 1e8)}
+                  </span>
+                </div>
+                <div>
+                  <span className="block text-zinc-500 uppercase tracking-wider mb-1">Target Price (UP)</span>
+                  <span className="font-mono text-sm text-neon">
+                    &ge; {targetPriceFormatted}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div>
               <PriceChart market={market} openedAt={marketState.openedAt} />
             </div>
           </div>
         </section>
 
-        <aside className="flex flex-col gap-6 rounded-3xl border border-white/10 bg-[#141414] p-6">
+        <aside className="flex flex-col gap-6 rounded-3xl border border-white/10 bg-[#141414] p-6 min-w-0">
           <div>
             <h2 className="text-xl font-semibold text-zinc-100">Encrypted Order Ticket</h2>
             <p className="text-sm text-zinc-400">
@@ -314,7 +422,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                     setAmount(Number.isFinite(nextValue) ? nextValue : 0);
                   }}
                   className="w-full bg-transparent text-2xl font-semibold text-zinc-100 focus:outline-none disabled:opacity-50"
-                  disabled={!authenticated || isSubmitting || marketState.status !== 0}
+                  disabled={!authenticated || isSubmitting || isClosed}
                 />
                 <span className="text-sm uppercase tracking-[0.2em] text-zinc-500">STORY</span>
               </div>
@@ -333,7 +441,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                     key={item.value}
                     type="button"
                     onClick={() => setDirection(item.value)}
-                    disabled={!authenticated || isSubmitting || marketState.status !== 0}
+                    disabled={!authenticated || isSubmitting || isClosed}
                     className={`rounded-2xl border px-4 py-5 text-lg font-semibold transition ${
                       isActive
                         ? item.value === 1
@@ -352,19 +460,19 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           <button
             type="button"
             onClick={handleBet}
-            disabled={!ready || isSubmitting || marketState.status !== 0}
+            disabled={!ready || isSubmitting || isClosed}
             className="mt-auto rounded-2xl bg-neon px-6 py-4 text-lg font-bold text-black transition hover:bg-neon/90 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-zinc-500"
           >
-            {marketState.status !== 0 ? "Market Closed" : "Encrypt & Place Bet 🔒"}
+            {isClosed ? "Market Closed" : "Encrypt & Place Bet 🔒"}
           </button>
 
           {statusMessage && (
-            <div className="rounded-2xl border border-white/10 bg-[#0B0B0B] p-4 text-xs text-zinc-200">
+            <div className="rounded-2xl border border-white/10 bg-[#0B0B0B] p-4 text-xs text-zinc-200 break-all">
               <p>{statusMessage}</p>
             </div>
           )}
 
-          <div className="rounded-2xl border border-white/10 bg-[#0B0B0B] p-4 text-xs text-zinc-500">
+          <div className="rounded-2xl border border-white/10 bg-[#0B0B0B] p-4 text-xs text-zinc-500 break-words">
             <p>
               Your bet payload remains hidden until resolution. Winners will supply decrypted
               payloads to claim their share of the pool. Support for sports and politics markets

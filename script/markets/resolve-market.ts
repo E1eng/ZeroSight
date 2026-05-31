@@ -3,7 +3,7 @@ import "dotenv/config";
 import { WrapperBuilder } from "@redstone-finance/evm-connector";
 import { ethers } from "ethers";
 
-import { FEED_IDS, MARKET_ABI, STATUS_LABELS, requireEnv, type AssetIndex } from "./utils";
+import { FEED_IDS, MARKET_ABI, STATUS_LABELS, requireEnv, ASSET_LABELS, type AssetIndex } from "./utils";
 
 async function main() {
   const rpcUrl = requireEnv("STORY_RPC_URL");
@@ -15,8 +15,7 @@ async function main() {
   const contract = new ethers.Contract(contractAddress, MARKET_ABI, wallet);
 
   const assetInput = (process.argv[2] ?? process.env.MARKET_ASSET ?? "ip").toLowerCase();
-  const assetLabels: Record<string, number> = { ip: 0, btc: 1, eth: 2 };
-  const assetIndex = assetLabels[assetInput] as AssetIndex;
+  const assetIndex = ASSET_LABELS[assetInput] as AssetIndex;
   if (assetIndex === undefined) throw new Error(`Unknown asset: ${assetInput}`);
 
   const marketState = await contract.markets(assetIndex);

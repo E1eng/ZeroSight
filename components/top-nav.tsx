@@ -48,7 +48,10 @@ export function TopNav() {
           >
             MARKETS
           </Link>
-          <Link href="#" className="transition hover:text-white">
+          <Link
+            href="/portfolio"
+            className={`transition hover:text-white ${pathname === "/portfolio" ? "text-neon" : ""}`}
+          >
             PORTFOLIO
           </Link>
           <Link href="#" className="transition hover:text-white">

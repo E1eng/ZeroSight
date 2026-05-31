@@ -99,6 +99,7 @@ contract ZeroSightMarket is
     event MarketResolved(uint8 indexed assetIndex, uint256 resolvedPrice, uint256 winningChoice, uint256 feeTaken);
     event WinningsDistributed(uint8 indexed assetIndex, address indexed bettor, uint256 amount);
     event WinningsDistributionFailed(uint8 indexed assetIndex, address indexed bettor, uint256 amount);
+    event BetRefunded(uint8 indexed assetIndex, address indexed bettor, uint256 amount);
     event FeedConfigUpdated(uint8 indexed assetIndex, bytes32 dataFeedId);
     event OracleConfigUpdated(uint8 uniqueSignersThreshold, address[] signers);
 
@@ -272,7 +273,28 @@ contract ZeroSightMarket is
         require(price > 0, "Invalid oracle price");
 
         m.resolvedPrice = price;
-        m.winningChoice = price >= m.openingPrice ? 1 : 0;
+        
+        // Dynamic target price calculation based on 1-hour and 24-hour volatility targets:
+        // - Hourly: Asset 0 (IP) +0.75%, Asset 1 (BTC) +0.25%, Asset 2 (ETH) +0.40%
+        // - Daily:  Asset 3 (IP) +4.00%, Asset 4 (BTC) +1.50%, Asset 5 (ETH) +2.50%
+        uint256 targetPrice;
+        if (assetIndex == 0) {
+            targetPrice = (m.openingPrice * 10075) / 10000;
+        } else if (assetIndex == 1) {
+            targetPrice = (m.openingPrice * 10025) / 10000;
+        } else if (assetIndex == 2) {
+            targetPrice = (m.openingPrice * 10040) / 10000;
+        } else if (assetIndex == 3) {
+            targetPrice = (m.openingPrice * 10400) / 10000;
+        } else if (assetIndex == 4) {
+            targetPrice = (m.openingPrice * 10150) / 10000;
+        } else if (assetIndex == 5) {
+            targetPrice = (m.openingPrice * 10250) / 10000;
+        } else {
+            targetPrice = m.openingPrice;
+        }
+
+        m.winningChoice = price >= targetPrice ? 1 : 0;
         
         // Protocol Fee Deduction (2%)
         uint256 fee = (m.totalPool * PROTOCOL_FEE_PERCENT) / 100;
@@ -315,7 +337,21 @@ contract ZeroSightMarket is
 
                 bet.distributed = true;
 
-                if (!bet.choiceRevealed || bet.direction != m.winningChoice) continue;
+                // Safety net: refund unrevealed bets (CDR decrypt failure)
+                if (!bet.choiceRevealed) {
+                    uint256 refundAmount = bet.amount;
+                    if (refundAmount > m.totalPool) refundAmount = m.totalPool;
+                    if (refundAmount > 0) {
+                        (bool refundOk, ) = bettor.call{value: refundAmount}("");
+                        if (refundOk) {
+                            m.totalPool -= refundAmount;
+                            emit BetRefunded(assetIndex, bettor, refundAmount);
+                        }
+                    }
+                    continue;
+                }
+
+                if (bet.direction != m.winningChoice) continue;
 
                 uint256 payout = (bet.shares * m.payoutPool) / m.winningSharesTotal;
                 if (payout > m.totalPool) payout = m.totalPool;
@@ -396,12 +432,21 @@ contract ZeroSightMarket is
         return userBets[assetIndex][bettor];
     }
 
+    function getSharesByChoice(uint8 assetIndex, uint256 choice) external view returns (uint256) {
+        require(choice <= 1, "Invalid choice");
+        return markets[assetIndex].totalSharesByChoice[choice];
+    }
+
     function getFeedConfig(uint8 assetIndex) external view returns (FeedConfig memory) {
         return feedConfigs[assetIndex];
     }
 
     function getBettorCount(uint8 assetIndex) external view returns (uint256) {
         return markets[assetIndex].bettors.length;
+    }
+
+    function getBettors(uint8 assetIndex) external view returns (address[] memory) {
+        return markets[assetIndex].bettors;
     }
 
     function getOracleSigners() external view returns (address[] memory) {
