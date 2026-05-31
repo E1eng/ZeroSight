@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { formatEther } from "viem";
 import Link from "next/link";
+import { useBets } from "@/hooks/use-bets";
 
 // ─── Types ───────────────────────────────────────────────────────
 interface BetEntry {
@@ -34,6 +35,7 @@ interface PortfolioData {
   bets: BetEntry[];
   winnings: WinEntry[];
   refunds: WinEntry[];
+  resolvedMarkets: { assetIndex: number; blockNumber: number }[];
   summary: PortfolioSummary;
 }
 
@@ -102,6 +104,7 @@ export default function PortfolioPage() {
   const [error, setError] = useState("");
 
   const walletAddress = wallets?.[0]?.address;
+  const { localBets } = useBets(walletAddress);
 
   const fetchPortfolio = useCallback(async () => {
     if (!walletAddress) return;
@@ -137,9 +140,17 @@ export default function PortfolioPage() {
         const hasRefund = data.refunds.some(
           (r) => r.assetIndex === bet.assetIndex && r.blockNumber > bet.blockNumber
         );
+        const hasResolved = data.resolvedMarkets?.some(
+          (r) => r.assetIndex === bet.assetIndex && r.blockNumber > bet.blockNumber
+        );
 
         let status: "won" | "lost" | "refunded" | "pending" = "pending";
         let payout = "—";
+        let deducedChoice = "🔒 Encrypted";
+
+        const resolvedEntry = data.resolvedMarkets?.find(
+          (r) => r.assetIndex === bet.assetIndex && r.blockNumber > bet.blockNumber
+        );
 
         if (hasWin) {
           // Find the matching win entry
@@ -148,16 +159,28 @@ export default function PortfolioPage() {
           );
           status = "won";
           payout = winEntry ? `+${formatIP(winEntry.amount)} IP` : "—";
+          if (resolvedEntry) {
+            deducedChoice = resolvedEntry.winningChoice === "1" ? "⬆️ Up" : "⬇️ Down";
+          }
         } else if (hasRefund) {
           status = "refunded";
           payout = `↩ ${formatIP(bet.amount)} IP`;
-        } else if (data.winnings.length > 0 || data.refunds.length > 0) {
-          // If there are outcomes for this asset but none matching this bet, it's a loss
+          deducedChoice = "⚠️ Failed to Decrypt";
+        } else if (hasResolved && resolvedEntry) {
+          // If the market resolved but we didn't get a win or refund event, we lost
           status = "lost";
           payout = `-${formatIP(bet.amount)} IP`;
+          // If they lost, they bet the opposite of the winning choice
+          deducedChoice = resolvedEntry.winningChoice === "1" ? "⬇️ Down" : "⬆️ Up";
         }
 
-        return { ...bet, status, payout };
+        // Override choice with localStorage actual choice if available
+        const localBet = localBets.find((b) => b.vaultId === bet.vaultId);
+        if (localBet) {
+          deducedChoice = localBet.direction === 1 ? "⬆️ Up" : "⬇️ Down";
+        }
+
+        return { ...bet, status, payout, choice: deducedChoice };
       }).reverse() // Most recent first
     : [];
 
@@ -270,6 +293,7 @@ export default function PortfolioPage() {
               <thead>
                 <tr className="border-b border-white/5 text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">
                   <th className="px-6 py-4">Market</th>
+                  <th className="px-6 py-4">Choice</th>
                   <th className="px-6 py-4">Amount</th>
                   <th className="px-6 py-4">Vault ID</th>
                   <th className="px-6 py-4">Outcome</th>
@@ -296,6 +320,9 @@ export default function PortfolioPage() {
                           <span className="text-lg">{ASSET_ICONS[bet.assetIndex] ?? "⚪"}</span>
                           <span className="font-semibold text-zinc-200">{bet.assetName}</span>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 font-semibold text-zinc-300">
+                        {bet.choice}
                       </td>
                       <td className="px-6 py-4 font-mono font-semibold text-zinc-200">
                         {formatIP(bet.amount)} IP
@@ -350,7 +377,11 @@ export default function PortfolioPage() {
                     </div>
                     <StatusBadge status={bet.status} />
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-zinc-500">Choice</span>
+                      <p className="font-semibold text-zinc-200">{bet.choice}</p>
+                    </div>
                     <div>
                       <span className="text-zinc-500">Amount</span>
                       <p className="font-mono font-semibold text-zinc-200">{formatIP(bet.amount)} IP</p>

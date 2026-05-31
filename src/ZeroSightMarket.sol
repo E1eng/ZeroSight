@@ -322,11 +322,6 @@ contract ZeroSightMarket is
         uint256 end = m.distributionIndex + batchSize;
         if (end > m.bettors.length) end = m.bettors.length;
 
-        if (m.winningSharesTotal == 0) {
-            m.distributionIndex = end;
-            return;
-        }
-
         for (uint256 i = m.distributionIndex; i < end; i++) {
             address bettor = m.bettors[i];
             BetInfo[] storage bets = userBets[assetIndex][bettor];
@@ -353,17 +348,19 @@ contract ZeroSightMarket is
 
                 if (bet.direction != m.winningChoice) continue;
 
-                uint256 payout = (bet.shares * m.payoutPool) / m.winningSharesTotal;
-                if (payout > m.totalPool) payout = m.totalPool;
-                
-                // Anti-Griefing safe push
-                (bool success, ) = bettor.call{value: payout}("");
-                if (success) {
-                    m.totalPool -= payout;
-                    emit WinningsDistributed(assetIndex, bettor, payout);
-                } else {
-                    emit WinningsDistributionFailed(assetIndex, bettor, payout);
-                    // Payout stays in m.totalPool and will be swept later
+                if (m.winningSharesTotal > 0) {
+                    uint256 payout = (bet.shares * m.payoutPool) / m.winningSharesTotal;
+                    if (payout > m.totalPool) payout = m.totalPool;
+                    
+                    // Anti-Griefing safe push
+                    (bool success, ) = bettor.call{value: payout}("");
+                    if (success) {
+                        m.totalPool -= payout;
+                        emit WinningsDistributed(assetIndex, bettor, payout);
+                    } else {
+                        emit WinningsDistributionFailed(assetIndex, bettor, payout);
+                        // Payout stays in m.totalPool and will be swept later
+                    }
                 }
             }
         }

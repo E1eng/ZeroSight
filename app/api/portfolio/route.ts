@@ -16,6 +16,9 @@ const WINNINGS_DISTRIBUTED_EVENT = parseAbiItem(
 const BET_REFUNDED_EVENT = parseAbiItem(
   "event BetRefunded(uint8 indexed assetIndex, address indexed bettor, uint256 amount)"
 );
+const MARKET_RESOLVED_EVENT = parseAbiItem(
+  "event MarketResolved(uint8 indexed assetIndex, uint256 resolvedPrice, uint256 winningChoice, uint256 feeTaken)"
+);
 
 const ASSET_NAMES: Record<number, string> = {
   0: "IP (Hourly)",
@@ -47,7 +50,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // Fetch all three event types in parallel
-    const [betLogs, winLogs, refundLogs] = await Promise.all([
+    const [betLogs, winLogs, refundLogs, resolvedLogs] = await Promise.all([
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
         event: BET_PLACED_EVENT,
@@ -66,6 +69,12 @@ export async function GET(req: NextRequest) {
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
         event: BET_REFUNDED_EVENT,
         args: { bettor: address as `0x${string}` },
+        fromBlock: "earliest",
+        toBlock: "latest"
+      }),
+      publicClient.getLogs({
+        address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
+        event: MARKET_RESOLVED_EVENT,
         fromBlock: "earliest",
         toBlock: "latest"
       })
@@ -112,10 +121,18 @@ export async function GET(req: NextRequest) {
       amount: (log.args.amount ?? BigInt(0)).toString()
     }));
 
+    const resolvedMarkets = resolvedLogs.map((log: any) => ({
+      txHash: log.transactionHash,
+      blockNumber: Number(log.blockNumber),
+      assetIndex: log.args.assetIndex ?? 0,
+      winningChoice: log.args.winningChoice?.toString() ?? "0",
+    }));
+
     return NextResponse.json({
       bets,
       winnings,
       refunds,
+      resolvedMarkets,
       summary: {
         totalBets: bets.length,
         totalWagered: bets.reduce((sum, b) => sum + BigInt(b.amount), BigInt(0)).toString(),

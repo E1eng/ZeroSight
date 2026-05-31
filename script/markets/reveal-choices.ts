@@ -60,6 +60,16 @@ const REVEAL_ABI = [
   }
 ] as const;
 
+const LOCK_ABI = [
+  {
+    inputs: [{ internalType: "uint8", name: "assetIndex", type: "uint8" }],
+    name: "lockMarket",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function"
+  }
+] as const;
+
 // ─── Helper: decrypt CDR vault with exponential backoff ──────────
 async function decryptWithRetry(
   cdrClient: any,
@@ -168,6 +178,19 @@ async function main() {
 
   if (bettors.length === 0) {
     console.log("No bettors in current round.");
+    if (status === 0) {
+      console.log("Locking market manually...");
+      const { request } = await publicClient.simulateContract({
+        address: ZERO_SIGHT_MARKET_ADDRESS,
+        abi: LOCK_ABI,
+        functionName: "lockMarket",
+        args: [activeAsset],
+        account
+      });
+      const hash = await walletClient.writeContract(request);
+      console.log(`Lock tx submitted: ${hash}`);
+      await publicClient.waitForTransactionReceipt({ hash });
+    }
     return;
   }
 
@@ -210,7 +233,20 @@ async function main() {
   }
 
   if (bettorsToReveal.length === 0) {
-    console.log("No valid choices decrypted (all already revealed or CDR failed). Exiting.");
+    console.log("No valid choices decrypted (all already revealed or CDR failed).");
+    if (status === 0) {
+      console.log("Locking market manually...");
+      const { request } = await publicClient.simulateContract({
+        address: ZERO_SIGHT_MARKET_ADDRESS,
+        abi: LOCK_ABI,
+        functionName: "lockMarket",
+        args: [activeAsset],
+        account
+      });
+      const hash = await walletClient.writeContract(request);
+      console.log(`Lock tx submitted: ${hash}`);
+      await publicClient.waitForTransactionReceipt({ hash });
+    }
     console.log("⚠️  Any unrevealed bets will be automatically refunded during distribution.");
     return;
   }
@@ -233,4 +269,7 @@ async function main() {
   console.log(`✅ Tx confirmed in block ${receipt.blockNumber}. ${bettorsToReveal.length} choice(s) revealed.`);
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

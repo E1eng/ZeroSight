@@ -33,8 +33,12 @@ async function main() {
   const totalBettors = Number(await contract.getBettorCount(assetIndex));
   console.log(`Total bettors: ${totalBettors}`);
 
-  let distributed = false;
+  let distributed = await contract.isFullyDistributed(assetIndex);
   let round = 0;
+
+  if (distributed) {
+    console.log("Market is already fully distributed (or no bettors).");
+  }
 
   while (!distributed) {
     const marketStateLoop = await contract.markets(assetIndex);

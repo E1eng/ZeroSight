@@ -2,7 +2,7 @@ import { CDRClient, initWasm, uuidToLabel } from "@piplabs/cdr-sdk";
 import { createPublicClient, encodeAbiParameters, http, toHex } from "viem";
 
 import {
-  SIGNER_CONDITION_ADDRESS,
+  OWNER_WRITE_CONDITION,
   OWNER_ADDRESS,
   STORY_API_URL,
   STORY_RPC_URL,
@@ -53,23 +53,20 @@ export async function encryptPayload(params: {
   walletAddress: `0x${string}`;
   payload: Uint8Array;
 }) {
-  const { client, walletAddress, payload } = params;
+  const { client, payload } = params;
 
-  // Owner-only: writer must match wallet, reads gated to the OWNER_ADDRESS EOA via the condition contract.
-  const writeConditionData = encodeAbiParameters([{ type: "address" }], [walletAddress]);
-  const readConditionData = encodeAbiParameters([{ type: "address" }], [OWNER_ADDRESS]);
-
-  const allocation = await client.uploader.allocate({
-    updatable: false,
-    writeConditionAddr: SIGNER_CONDITION_ADDRESS,
-    writeConditionData,
-    readConditionAddr: SIGNER_CONDITION_ADDRESS, // This must be the Condition Contract, not the EOA directly
-    readConditionData,
-    skipConditionValidation: true
+  // 1. Call Backend API to Allocate Vault (Gasless)
+  const allocRes = await fetch("/api/cdr/allocate", {
+    method: "POST",
   });
+  if (!allocRes.ok) {
+    throw new Error(`Failed to allocate vault: ${await allocRes.text()}`);
+  }
+  const { uuid, txHash: allocateTx } = await allocRes.json();
 
+  // 2. Encrypt locally in browser using the UUID label
   const globalPubKey = await client.observer.getGlobalPubKey();
-  const label = uuidToLabel(allocation.uuid);
+  const label = uuidToLabel(uuid);
 
   const ciphertext = await client.uploader.encryptDataKey({
     dataKey: payload,
@@ -77,14 +74,23 @@ export async function encryptPayload(params: {
     label
   });
 
-  await client.uploader.write({
-    uuid: allocation.uuid,
-    accessAuxData: "0x",
-    encryptedData: toHex(ciphertext.raw)
+  // 3. Call Backend API to Write to Vault (Gasless)
+  const writeRes = await fetch("/api/cdr/write", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      uuid,
+      encryptedDataHex: toHex(ciphertext.raw)
+    })
   });
-
+  if (!writeRes.ok) {
+    throw new Error(`Failed to write to vault: ${await writeRes.text()}`);
+  }
+  
   return {
-    uuid: allocation.uuid,
-    txHash: allocation.txHash
+    uuid,
+    txHash: allocateTx
   };
 }
