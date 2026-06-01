@@ -51,7 +51,7 @@ export async function POST(req: Request) {
 
     console.log(`Writing to gasless CDR vault ${uuid}...`);
     const writeResult = await cdrClient.uploader.write({
-      uuid: Number(uuid),
+      uuid: BigInt(uuid),
       accessAuxData: "0x",
       encryptedData: encryptedDataHex,
     });

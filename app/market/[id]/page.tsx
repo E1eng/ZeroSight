@@ -200,7 +200,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
       });
 
       setStatusMessage(
-        `Encrypted vault #${result.uuid}. Allocation tx: ${result.txHash}. Broadcasting bet…`
+        `Secured bet in encrypted vault #${result.uuid}. Broadcasting bet…`
       );
 
       const betTx = await placeBetOnChain({

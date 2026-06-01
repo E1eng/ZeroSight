@@ -66,7 +66,7 @@ export async function encryptPayload(params: {
 
   // 2. Encrypt locally in browser using the UUID label
   const globalPubKey = await client.observer.getGlobalPubKey();
-  const label = uuidToLabel(uuid);
+  const label = uuidToLabel(BigInt(uuid));
 
   const ciphertext = await client.uploader.encryptDataKey({
     dataKey: payload,

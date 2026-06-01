@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     console.log(`Vault allocated: ${allocation.uuid}`);
 
     return NextResponse.json({
-      uuid: allocation.uuid,
+      uuid: allocation.uuid.toString(),
       txHash: allocation.txHash,
     });
   } catch (error: any) {
