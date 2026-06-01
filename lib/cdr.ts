@@ -64,9 +64,15 @@ export async function encryptPayload(params: {
   }
   const { uuid, txHash: allocateTx } = await allocRes.json();
 
-  // 2. Encrypt locally in browser using the UUID label
+  // 2. Encrypt locally in browser using the UUID label.
+  //    uuidToLabel expects a JS number (it writes a 4-byte big-endian uint32),
+  //    NOT a BigInt — passing BigInt throws "Cannot convert a BigInt value to a number".
   const globalPubKey = await client.observer.getGlobalPubKey();
-  const label = uuidToLabel(BigInt(uuid));
+  const uuidNum = Number(uuid);
+  if (!Number.isSafeInteger(uuidNum) || uuidNum < 0 || uuidNum > 0xffffffff) {
+    throw new Error(`Vault uuid ${uuid} out of uint32 range for label derivation`);
+  }
+  const label = uuidToLabel(uuidNum);
 
   const ciphertext = await client.uploader.encryptDataKey({
     dataKey: payload,

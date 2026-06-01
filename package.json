@@ -16,6 +16,7 @@
     "@redstone-finance/evm-connector": "^0.9.0",
     "@tanstack/react-query": "^5.51.1",
     "clsx": "^2.1.1",
+    "dotenv": "^16.4.5",
     "ethers": "^5.8.0",
     "multiformats": "^14.0.0",
     "next": "14.2.3",
@@ -35,6 +36,7 @@
     "lint-staged": "^15.2.2",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
+    "tsx": "^4.19.0",
     "typescript": "5.4.5"
   },
   "lint-staged": {

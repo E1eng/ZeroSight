@@ -9,16 +9,26 @@ export const MARKET_ABI = [
   "function getBettorCount(uint8 assetIndex) view returns (uint256)",
   "function getBettors(uint8 assetIndex) view returns (address[])",
   "function markets(uint8 assetIndex) view returns (uint8 status, uint8 category, uint256 totalPool, uint256 openedAt, uint256 deadline, uint256 openingPrice, uint256 resolvedPrice, uint256 winningChoice, uint256 payoutPool, uint256 winningSharesTotal, uint256 distributionIndex)",
-  "function getOracleSigners() view returns (address[])"
+  "function getOracleSigners() view returns (address[])",
+  // ── V2 additions ──
+  "function currentRoundId(uint8 assetIndex) view returns (uint256)",
+  "function targetBps(uint8 assetIndex) view returns (uint16)",
+  "function keeper() view returns (address)",
+  "function treasury() view returns (address)",
+  "function owner() view returns (address)"
 ];
 
-export type MarketCategory = 0 | 1 | 2; // Crypto | Sports | Politics
-export type AssetIndex = 0 | 1 | 2 | 3 | 4 | 5; // Hourly: IP, BTC, ETH | Daily: IP, BTC, ETH
+export type MarketCategory = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type AssetIndex = 0 | 1 | 2 | 3 | 4 | 5;
 
 export const CATEGORY_LABELS: Record<string, MarketCategory> = {
   crypto: 0,
   sports: 1,
-  politics: 2
+  politics: 2,
+  esports: 3,
+  economics: 4,
+  entertainment: 5,
+  other: 6
 };
 
 export const ASSET_LABELS: Record<string, AssetIndex> = {

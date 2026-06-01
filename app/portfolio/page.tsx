@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
-import { formatEther } from "viem";
+import { formatEther, parseEther } from "viem";
 import Link from "next/link";
+
 import { useBets } from "@/hooks/use-bets";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -13,89 +14,94 @@ interface BetEntry {
   assetIndex: number;
   assetName: string;
   vaultId: string;
+  roundId: string;
   amount: string;
-}
-
-interface WinEntry {
-  txHash: string;
-  blockNumber: number;
-  assetIndex: number;
-  assetName: string;
-  amount: string;
-}
-
-interface PortfolioSummary {
-  totalBets: number;
-  totalWagered: string;
-  totalWon: string;
-  totalRefunded: string;
+  status: "won" | "lost" | "refunded" | "pending";
+  payout: string;
+  choice: string;
 }
 
 interface PortfolioData {
   bets: BetEntry[];
-  winnings: WinEntry[];
-  refunds: WinEntry[];
-  resolvedMarkets: { assetIndex: number; blockNumber: number }[];
-  summary: PortfolioSummary;
+  summary: {
+    totalBets: number;
+    totalWagered: string;
+    totalWon: string;
+    totalRefunded: string;
+  };
 }
 
-// ─── Asset icons ─────────────────────────────────────────────────
 const ASSET_ICONS: Record<number, string> = {
-  0: "🟣", 1: "🟠", 2: "🔵", 3: "🟣", 4: "🟠", 5: "🔵"
+  0: "🟣",
+  1: "🟠",
+  2: "🔵",
+  3: "🟣",
+  4: "🟠",
+  5: "🔵"
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────
-function shortenHash(hash: string): string {
+function shortenHash(hash: string) {
   if (!hash || hash.length < 12) return hash;
   return `${hash.slice(0, 6)}…${hash.slice(-4)}`;
 }
 
-function formatIP(wei: string): string {
+function formatIP(wei: string) {
   try {
-    const val = Number(formatEther(BigInt(wei)));
-    return val.toFixed(val < 0.01 ? 6 : 4);
+    const sign = wei.startsWith("-") ? "-" : wei.startsWith("+") ? "+" : "";
+    // NOTE: '-' must be escaped/last in the class, otherwise '+-↩' is parsed as
+    // a char RANGE that also matches all digits — which silently stripped the
+    // whole number and made amounts render as raw wei.
+    const stripped = wei.replace(/^[+\-↩\s]+/, "");
+    if (!stripped) return wei;
+    const val = Number(formatEther(BigInt(stripped)));
+    const str = val.toFixed(val < 0.01 ? 6 : 4);
+    return sign ? `${sign}${str}` : str;
   } catch {
-    return "0";
+    return wei;
   }
 }
 
-// ─── Status Badge Component ──────────────────────────────────────
-function StatusBadge({ status }: { status: "won" | "lost" | "refunded" | "pending" }) {
+function StatusBadge({ status }: { status: BetEntry["status"] }) {
   const styles: Record<string, string> = {
     won: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
     lost: "bg-red-500/15 text-red-400 border-red-500/30",
     refunded: "bg-amber-500/15 text-amber-400 border-amber-500/30",
     pending: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30"
   };
-
   const labels: Record<string, string> = {
     won: "🏆 Won",
     lost: "❌ Lost",
     refunded: "↩️ Refunded",
     pending: "⏳ Pending"
   };
-
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold ${styles[status]}`}>
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold ${styles[status]}`}
+    >
       {labels[status]}
     </span>
   );
 }
 
-// ─── Stat Card ───────────────────────────────────────────────────
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function StatCard({
+  label,
+  value,
+  accent
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+}) {
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-br from-white/[0.04] to-transparent p-6 transition-all duration-300 hover:border-white/10 hover:shadow-lg hover:shadow-white/[0.02]">
-      <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-      <p className="relative text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">{label}</p>
-      <p className={`relative mt-2 text-2xl font-bold tracking-tight ${accent ?? "text-zinc-100"}`}>
+    <div className="group relative overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-br from-white/[0.04] to-transparent p-6">
+      <p className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500">{label}</p>
+      <p className={`mt-2 text-2xl font-bold tracking-tight ${accent ?? "text-zinc-100"}`}>
         {value}
       </p>
     </div>
   );
 }
 
-// ─── Main Page ───────────────────────────────────────────────────
 export default function PortfolioPage() {
   const { authenticated, login, ready } = usePrivy();
   const { wallets } = useWallets();
@@ -108,15 +114,12 @@ export default function PortfolioPage() {
 
   const fetchPortfolio = useCallback(async () => {
     if (!walletAddress) return;
-
     setLoading(true);
     setError("");
-
     try {
       const res = await fetch(`/api/portfolio?address=${encodeURIComponent(walletAddress)}`);
-      if (!res.ok) throw new Error("Failed to load portfolio");
-      const json = await res.json();
-      setData(json);
+      if (!res.ok) throw new Error("Failed");
+      setData(await res.json());
     } catch {
       setError("Failed to load portfolio data. Please try again.");
     } finally {
@@ -125,100 +128,99 @@ export default function PortfolioPage() {
   }, [walletAddress]);
 
   useEffect(() => {
-    if (walletAddress) {
-      fetchPortfolio();
-    }
+    if (walletAddress) fetchPortfolio();
   }, [walletAddress, fetchPortfolio]);
 
-  // Build enriched bet list with outcome status
-  const enrichedBets = data
-    ? data.bets.map((bet) => {
-        // Check if this bet has a matching winning or refund event
-        const hasWin = data.winnings.some(
-          (w) => w.assetIndex === bet.assetIndex && w.blockNumber > bet.blockNumber
-        );
-        const hasRefund = data.refunds.some(
-          (r) => r.assetIndex === bet.assetIndex && r.blockNumber > bet.blockNumber
-        );
-        const hasResolved = data.resolvedMarkets?.some(
-          (r) => r.assetIndex === bet.assetIndex && r.blockNumber > bet.blockNumber
-        );
+  // Merge local pending bets (placed but not yet indexed by chain getLogs)
+  // with server-correlated bets. Dedup by vaultId.
+  const allBets = useMemo(() => {
+    if (!data) return [] as BetEntry[];
+    const knownVaults = new Set(data.bets.map((b) => b.vaultId));
+    const knownTx = new Set(data.bets.map((b) => b.txHash.toLowerCase()));
+    const PENDING_TTL_MS = 30 * 60 * 1000; // drop stale pending entries after 30m
+    const now = Date.now();
 
-        let status: "won" | "lost" | "refunded" | "pending" = "pending";
-        let payout = "—";
-        let deducedChoice = "🔒 Encrypted";
+    // Map vaultId -> own choice from localStorage. We always know OUR OWN pick,
+    // so it's safe to surface it even while the market is still blind to others.
+    const localChoiceByVault = new Map<string, number>();
+    for (const lb of localBets) localChoiceByVault.set(lb.vaultId, lb.direction);
 
-        const resolvedEntry = data.resolvedMarkets?.find(
-          (r) => r.assetIndex === bet.assetIndex && r.blockNumber > bet.blockNumber
-        );
-
-        if (hasWin) {
-          // Find the matching win entry
-          const winEntry = data.winnings.find(
-            (w) => w.assetIndex === bet.assetIndex && w.blockNumber > bet.blockNumber
-          );
-          status = "won";
-          payout = winEntry ? `+${formatIP(winEntry.amount)} IP` : "—";
-          if (resolvedEntry) {
-            deducedChoice = resolvedEntry.winningChoice === "1" ? "⬆️ Up" : "⬇️ Down";
-          }
-        } else if (hasRefund) {
-          status = "refunded";
-          payout = `↩ ${formatIP(bet.amount)} IP`;
-          deducedChoice = "⚠️ Failed to Decrypt";
-        } else if (hasResolved && resolvedEntry) {
-          // If the market resolved but we didn't get a win or refund event, we lost
-          status = "lost";
-          payout = `-${formatIP(bet.amount)} IP`;
-          // If they lost, they bet the opposite of the winning choice
-          deducedChoice = resolvedEntry.winningChoice === "1" ? "⬇️ Down" : "⬆️ Up";
+    const pending: BetEntry[] = localBets
+      .filter((lb) => {
+        if (knownVaults.has(lb.vaultId)) return false;
+        if (lb.txHash && knownTx.has(lb.txHash.toLowerCase())) return false;
+        if (lb.placedAt && now - lb.placedAt > PENDING_TTL_MS) return false;
+        return true;
+      })
+      .map((lb) => {
+        let amountWei = "0";
+        try {
+          // parseEther avoids float precision loss (0.11 * 1e18 != exact).
+          amountWei = parseEther(String(lb.amount)).toString();
+        } catch {
+          amountWei = "0";
         }
-
-        // Override choice with localStorage actual choice if available
-        const localBet = localBets.find((b) => b.vaultId === bet.vaultId);
-        if (localBet) {
-          deducedChoice = localBet.direction === 1 ? "⬆️ Up" : "⬇️ Down";
-        }
-
-        return { ...bet, status, payout, choice: deducedChoice };
-      }).reverse() // Most recent first
-    : [];
+        return {
+          txHash: lb.txHash,
+          blockNumber: 0,
+          assetIndex: 0,
+          assetName: lb.market.toUpperCase(),
+          vaultId: lb.vaultId,
+          roundId: "?",
+          amount: amountWei,
+          status: "pending" as const,
+          payout: "—",
+          choice: lb.direction === 1 ? "⬆️ Up" : "⬇️ Down"
+        };
+      });
+    // Local pending bets first (most recent action), then server data.
+    return [...pending, ...data.bets].map((bet) => {
+      // For bets still showing the blind placeholder, fill in the owner's real
+      // choice from localStorage so the user sees their own pick immediately.
+      if (bet.choice === "🔒 Encrypted") {
+        const dir = localChoiceByVault.get(bet.vaultId);
+        if (dir === 1) return { ...bet, choice: "⬆️ Up" };
+        if (dir === 0) return { ...bet, choice: "⬇️ Down" };
+      }
+      return bet;
+    });
+  }, [data, localBets]);
 
   const totalWagered = data ? formatIP(data.summary.totalWagered) : "0";
   const totalWon = data ? formatIP(data.summary.totalWon) : "0";
   const totalRefunded = data ? formatIP(data.summary.totalRefunded) : "0";
   const netPnL = data
     ? formatIP(
-        (BigInt(data.summary.totalWon) + BigInt(data.summary.totalRefunded) - BigInt(data.summary.totalWagered)).toString()
+        (
+          BigInt(data.summary.totalWon) +
+          BigInt(data.summary.totalRefunded) -
+          BigInt(data.summary.totalWagered)
+        ).toString()
       )
     : "0";
   const isPositivePnL = data
-    ? BigInt(data.summary.totalWon) + BigInt(data.summary.totalRefunded) >= BigInt(data.summary.totalWagered)
+    ? BigInt(data.summary.totalWon) + BigInt(data.summary.totalRefunded) >=
+      BigInt(data.summary.totalWagered)
     : false;
 
-  // ─── Not Connected State ─────────────────────────────────────
+  // ── Not authenticated ────────────────────────────────────────
   if (ready && !authenticated) {
     return (
       <div className="mx-auto flex w-full max-w-[1400px] flex-col items-center justify-center px-6 py-24">
         <div className="relative overflow-hidden rounded-3xl border border-white/5 bg-gradient-to-br from-white/[0.03] to-transparent p-12 text-center">
-          <div className="absolute -top-20 -right-20 h-40 w-40 rounded-full bg-neon/5 blur-3xl" />
-          <div className="absolute -bottom-20 -left-20 h-40 w-40 rounded-full bg-electric/5 blur-3xl" />
-
-          <div className="relative">
-            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/5 text-4xl">
-              📊
-            </div>
-            <h2 className="mb-3 text-2xl font-bold text-zinc-100">Connect Your Wallet</h2>
-            <p className="mb-8 text-sm text-zinc-500">
-              View your betting history, outcomes, and P&L across all markets.
-            </p>
-            <button
-              onClick={login}
-              className="rounded-2xl bg-neon px-8 py-4 text-lg font-bold text-black transition hover:bg-neon/90"
-            >
-              Connect Wallet
-            </button>
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-white/5 text-4xl">
+            📊
           </div>
+          <h2 className="mb-3 text-2xl font-bold text-zinc-100">Connect Your Wallet</h2>
+          <p className="mb-8 text-sm text-zinc-500">
+            View your betting history, outcomes, and P&amp;L across all markets.
+          </p>
+          <button
+            onClick={login}
+            className="rounded-2xl bg-neon px-8 py-4 text-lg font-bold text-black transition hover:bg-neon/90"
+          >
+            Connect Wallet
+          </button>
         </div>
       </div>
     );
@@ -226,7 +228,6 @@ export default function PortfolioPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[1400px] flex-col px-6 py-8 lg:px-12">
-      {/* Header */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-widest text-zinc-100">PORTFOLIO</h1>
@@ -245,7 +246,6 @@ export default function PortfolioPage() {
         </button>
       </div>
 
-      {/* Summary Stats */}
       <div className="mb-10 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total Bets" value={data?.summary.totalBets.toString() ?? "—"} />
         <StatCard label="Total Wagered" value={`${totalWagered} IP`} />
@@ -257,60 +257,54 @@ export default function PortfolioPage() {
         />
       </div>
 
-      {/* Legend */}
-      <div className="mb-6 flex flex-wrap items-center gap-4">
+      <div className="mb-6 flex flex-wrap items-center gap-3">
         <StatusBadge status="won" />
         <StatusBadge status="lost" />
         <StatusBadge status="refunded" />
         <StatusBadge status="pending" />
-        {data && data.summary.totalRefunded !== "0" && (
-          <span className="ml-auto text-xs text-amber-400/70">
-            ↩️ Refunded = CDR decrypt failed, full amount returned
-          </span>
-        )}
       </div>
 
-      {/* Error */}
       {error && (
         <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
           {error}
         </div>
       )}
 
-      {/* Loading */}
       {loading && (
         <div className="flex items-center justify-center py-20">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-zinc-700 border-t-neon" />
         </div>
       )}
 
-      {/* Bet History Table */}
       {!loading && data && (
         <div className="overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-br from-white/[0.02] to-transparent">
-          {/* Desktop Table */}
           <div className="hidden lg:block">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-white/5 text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">
                   <th className="px-6 py-4">Market</th>
+                  <th className="px-6 py-4">Round</th>
                   <th className="px-6 py-4">Choice</th>
                   <th className="px-6 py-4">Amount</th>
-                  <th className="px-6 py-4">Vault ID</th>
+                  <th className="px-6 py-4">Vault</th>
                   <th className="px-6 py-4">Outcome</th>
                   <th className="px-6 py-4">Payout</th>
                   <th className="px-6 py-4">Tx</th>
                 </tr>
               </thead>
               <tbody>
-                {enrichedBets.length === 0 ? (
+                {allBets.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-16 text-center text-zinc-500">
-                      <div className="text-3xl mb-2">🎯</div>
-                      No bets yet. <Link href="/" className="text-neon hover:underline">Place your first bet!</Link>
+                    <td colSpan={8} className="px-6 py-16 text-center text-zinc-500">
+                      <div className="mb-2 text-3xl">🎯</div>
+                      No bets yet.{" "}
+                      <Link href="/" className="text-neon hover:underline">
+                        Place your first bet!
+                      </Link>
                     </td>
                   </tr>
                 ) : (
-                  enrichedBets.map((bet, i) => (
+                  allBets.map((bet, i) => (
                     <tr
                       key={`${bet.txHash}-${i}`}
                       className="border-b border-white/[0.03] transition-colors hover:bg-white/[0.02]"
@@ -321,34 +315,41 @@ export default function PortfolioPage() {
                           <span className="font-semibold text-zinc-200">{bet.assetName}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 font-semibold text-zinc-300">
-                        {bet.choice}
-                      </td>
+                      <td className="px-6 py-4 font-mono text-zinc-400">#{bet.roundId}</td>
+                      <td className="px-6 py-4 font-semibold text-zinc-300">{bet.choice}</td>
                       <td className="px-6 py-4 font-mono font-semibold text-zinc-200">
                         {formatIP(bet.amount)} IP
                       </td>
-                      <td className="px-6 py-4 font-mono text-zinc-500">
-                        #{bet.vaultId}
+                      <td className="px-6 py-4 font-mono text-xs text-zinc-500">
+                        #{bet.vaultId.slice(0, 8)}…
                       </td>
                       <td className="px-6 py-4">
                         <StatusBadge status={bet.status} />
                       </td>
-                      <td className={`px-6 py-4 font-mono font-semibold ${
-                        bet.status === "won" ? "text-emerald-400" :
-                        bet.status === "refunded" ? "text-amber-400" :
-                        bet.status === "lost" ? "text-red-400" : "text-zinc-500"
-                      }`}>
-                        {bet.payout}
+                      <td
+                        className={`px-6 py-4 font-mono font-semibold ${
+                          bet.status === "won"
+                            ? "text-emerald-400"
+                            : bet.status === "refunded"
+                            ? "text-amber-400"
+                            : bet.status === "lost"
+                            ? "text-red-400"
+                            : "text-zinc-500"
+                        }`}
+                      >
+                        {bet.payout === "—" ? "—" : `${formatIP(bet.payout)} IP`}
                       </td>
                       <td className="px-6 py-4">
-                        <a
-                          href={`https://aeneid.storyscan.xyz/tx/${bet.txHash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-mono text-electric hover:text-electric/80 transition"
-                        >
-                          {shortenHash(bet.txHash)}
-                        </a>
+                        {bet.txHash && (
+                          <a
+                            href={`https://aeneid.storyscan.xyz/tx/${bet.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono text-electric transition hover:text-electric/80"
+                          >
+                            {shortenHash(bet.txHash)}
+                          </a>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -357,15 +358,17 @@ export default function PortfolioPage() {
             </table>
           </div>
 
-          {/* Mobile Cards */}
           <div className="flex flex-col gap-3 p-4 lg:hidden">
-            {enrichedBets.length === 0 ? (
+            {allBets.length === 0 ? (
               <div className="py-16 text-center text-zinc-500">
-                <div className="text-3xl mb-2">🎯</div>
-                No bets yet. <Link href="/" className="text-neon hover:underline">Place your first bet!</Link>
+                <div className="mb-2 text-3xl">🎯</div>
+                No bets yet.{" "}
+                <Link href="/" className="text-neon hover:underline">
+                  Place your first bet!
+                </Link>
               </div>
             ) : (
-              enrichedBets.map((bet, i) => (
+              allBets.map((bet, i) => (
                 <div
                   key={`${bet.txHash}-${i}`}
                   className="rounded-xl border border-white/5 bg-white/[0.02] p-4"
@@ -377,63 +380,41 @@ export default function PortfolioPage() {
                     </div>
                     <StatusBadge status={bet.status} />
                   </div>
-                  <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-zinc-500">Round</span>
+                      <p className="font-mono text-zinc-300">#{bet.roundId}</p>
+                    </div>
                     <div>
                       <span className="text-zinc-500">Choice</span>
                       <p className="font-semibold text-zinc-200">{bet.choice}</p>
                     </div>
                     <div>
                       <span className="text-zinc-500">Amount</span>
-                      <p className="font-mono font-semibold text-zinc-200">{formatIP(bet.amount)} IP</p>
+                      <p className="font-mono font-semibold text-zinc-200">
+                        {formatIP(bet.amount)} IP
+                      </p>
                     </div>
                     <div>
                       <span className="text-zinc-500">Payout</span>
-                      <p className={`font-mono font-semibold ${
-                        bet.status === "won" ? "text-emerald-400" :
-                        bet.status === "refunded" ? "text-amber-400" :
-                        bet.status === "lost" ? "text-red-400" : "text-zinc-500"
-                      }`}>{bet.payout}</p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Vault</span>
-                      <p className="font-mono text-zinc-400">#{bet.vaultId}</p>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Tx</span>
-                      <p>
-                        <a
-                          href={`https://aeneid.storyscan.xyz/tx/${bet.txHash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-mono text-electric hover:text-electric/80 transition"
-                        >
-                          {shortenHash(bet.txHash)}
-                        </a>
+                      <p
+                        className={`font-mono font-semibold ${
+                          bet.status === "won"
+                            ? "text-emerald-400"
+                            : bet.status === "refunded"
+                            ? "text-amber-400"
+                            : bet.status === "lost"
+                            ? "text-red-400"
+                            : "text-zinc-500"
+                        }`}
+                      >
+                        {bet.payout === "—" ? "—" : `${formatIP(bet.payout)} IP`}
                       </p>
                     </div>
                   </div>
                 </div>
               ))
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Refund Info Banner */}
-      {data && data.refunds.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-amber-500/10 bg-amber-500/5 p-5">
-          <div className="flex items-start gap-3">
-            <span className="text-xl">ℹ️</span>
-            <div className="text-sm text-amber-300/80">
-              <p className="font-semibold text-amber-300 mb-1">
-                About Refunded Bets
-              </p>
-              <p>
-                Bets are refunded when the encrypted choice could not be decrypted by the keeper bot
-                (CDR infrastructure issue). Your full bet amount is automatically returned by the smart
-                contract during distribution — no fees are deducted.
-              </p>
-            </div>
           </div>
         </div>
       )}

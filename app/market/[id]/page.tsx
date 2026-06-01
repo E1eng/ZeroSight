@@ -269,7 +269,19 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                 {title}
               </h1>
               <div className="flex items-center gap-3 text-xs font-bold">
-                <span className="rounded bg-neon px-2 py-1 text-black">ACTIVE</span>
+                {(() => {
+                  const s = marketState.status;
+                  if (s === 0) {
+                    return <span className="rounded bg-neon px-2 py-1 text-black">ACTIVE</span>;
+                  }
+                  if (s === 1) {
+                    return <span className="rounded bg-amber-500 px-2 py-1 text-black">LOCKED</span>;
+                  }
+                  if (s === 2) {
+                    return <span className="rounded bg-zinc-700 px-2 py-1 text-zinc-200">RESOLVED</span>;
+                  }
+                  return <span className="rounded bg-zinc-800 px-2 py-1 text-zinc-400">…</span>;
+                })()}
                 <span className="text-zinc-500">{activeMetadata.durationLabel} Prediction Cycle</span>
               </div>
             </div>

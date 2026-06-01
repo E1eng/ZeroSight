@@ -1,24 +1,14 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { createPublicClient, http, parseAbiItem } from "viem";
-import { STORY_TESTNET_CHAIN, STORY_RPC_URL, ZERO_SIGHT_MARKET_ADDRESS } from "@/lib/story";
+import { createPublicClient, http } from "viem";
+
+import { MARKET_ABI } from "@/lib/abi";
+import { STORY_RPC_URL, STORY_TESTNET_CHAIN, ZERO_SIGHT_MARKET_ADDRESS } from "@/lib/story";
 
 const publicClient = createPublicClient({
   chain: STORY_TESTNET_CHAIN,
   transport: http(STORY_RPC_URL)
 });
-
-const BET_PLACED_EVENT = parseAbiItem(
-  "event BetPlaced(address indexed bettor, string vaultId, uint8 assetIndex, uint256 amount)"
-);
-const WINNINGS_DISTRIBUTED_EVENT = parseAbiItem(
-  "event WinningsDistributed(uint8 indexed assetIndex, address indexed bettor, uint256 amount)"
-);
-const BET_REFUNDED_EVENT = parseAbiItem(
-  "event BetRefunded(uint8 indexed assetIndex, address indexed bettor, uint256 amount)"
-);
-const MARKET_RESOLVED_EVENT = parseAbiItem(
-  "event MarketResolved(uint8 indexed assetIndex, uint256 resolvedPrice, uint256 winningChoice, uint256 feeTaken)"
-);
 
 const ASSET_NAMES: Record<number, string> = {
   0: "IP (Hourly)",
@@ -29,9 +19,32 @@ const ASSET_NAMES: Record<number, string> = {
   5: "ETH (Daily)"
 };
 
-// Simple address validation: must be a 0x-prefixed hex string of 42 chars
 function isValidAddress(addr: string): addr is `0x${string}` {
   return /^0x[0-9a-fA-F]{40}$/.test(addr);
+}
+
+/** Pick named events from the central ABI so we never drift. */
+const BetPlacedEvent = MARKET_ABI.find((x) => x.type === "event" && x.name === "BetPlaced")!;
+const WinningsDistributedEvent = MARKET_ABI.find(
+  (x) => x.type === "event" && x.name === "WinningsDistributed"
+)!;
+const BetRefundedEvent = MARKET_ABI.find((x) => x.type === "event" && x.name === "BetRefunded")!;
+const MarketResolvedEvent = MARKET_ABI.find(
+  (x) => x.type === "event" && x.name === "MarketResolved"
+)!;
+
+interface BetEntry {
+  txHash: string;
+  blockNumber: number;
+  assetIndex: number;
+  assetName: string;
+  vaultId: string;
+  roundId: string;
+  amount: string;
+  status: "won" | "lost" | "refunded" | "pending";
+  payout: string;
+  /** Choice deduced from event data when possible. Always "🔒 Encrypted" for pending. */
+  choice: string;
 }
 
 export async function GET(req: NextRequest) {
@@ -45,106 +58,134 @@ export async function GET(req: NextRequest) {
     !ZERO_SIGHT_MARKET_ADDRESS ||
     ZERO_SIGHT_MARKET_ADDRESS === "0x0000000000000000000000000000000000000000"
   ) {
-    return NextResponse.json({ bets: [], winnings: [], refunds: [] });
+    return NextResponse.json({ bets: [], summary: emptySummary() });
   }
 
   try {
-    // Fetch all three event types in parallel
     const [betLogs, winLogs, refundLogs, resolvedLogs] = await Promise.all([
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: BET_PLACED_EVENT,
+        event: BetPlacedEvent as any,
         args: { bettor: address as `0x${string}` },
         fromBlock: "earliest",
         toBlock: "latest"
       }),
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: WINNINGS_DISTRIBUTED_EVENT,
+        event: WinningsDistributedEvent as any,
         args: { bettor: address as `0x${string}` },
         fromBlock: "earliest",
         toBlock: "latest"
       }),
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: BET_REFUNDED_EVENT,
+        event: BetRefundedEvent as any,
         args: { bettor: address as `0x${string}` },
         fromBlock: "earliest",
         toBlock: "latest"
       }),
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: MARKET_RESOLVED_EVENT,
+        event: MarketResolvedEvent as any,
         fromBlock: "earliest",
         toBlock: "latest"
       })
     ]);
 
-    // Build a set of (blockNumber, txHash) for winnings and refunds for cross-referencing
-    const winMap = new Map<string, bigint>();
+    // ── Index winnings & refunds by vaultId (V2 emits vaultId on these). ──
+    const winByVault = new Map<string, { amount: bigint; choice: number }>();
+    const winByAssetRound = new Map<string, { amount: bigint; choice: number }>();
     for (const log of winLogs) {
-      const key = `${log.args.assetIndex}-${log.blockNumber}`;
-      winMap.set(key, (winMap.get(key) ?? BigInt(0)) + (log.args.amount ?? BigInt(0)));
+      const v = String(log.args.vaultId ?? "");
+      const amt = (log.args.amount as bigint) ?? 0n;
+      if (v) winByVault.set(v, { amount: amt, choice: -1 });
+      const k = `${log.args.assetIndex}-${log.args.roundId}`;
+      const prev = winByAssetRound.get(k);
+      winByAssetRound.set(k, { amount: (prev?.amount ?? 0n) + amt, choice: -1 });
     }
 
-    const refundSet = new Set<string>();
-    const refundAmounts = new Map<string, bigint>();
+    const refundByVault = new Map<string, bigint>();
     for (const log of refundLogs) {
-      const key = `${log.args.assetIndex}-${log.blockNumber}`;
-      refundSet.add(key);
-      refundAmounts.set(key, (refundAmounts.get(key) ?? BigInt(0)) + (log.args.amount ?? BigInt(0)));
+      const v = String(log.args.vaultId ?? "");
+      const amt = (log.args.amount as bigint) ?? 0n;
+      if (v) refundByVault.set(v, amt);
     }
 
-    // Build bets list with enriched data
-    const bets = betLogs.map((log) => ({
-      txHash: log.transactionHash,
-      blockNumber: Number(log.blockNumber),
-      assetIndex: log.args.assetIndex ?? 0,
-      assetName: ASSET_NAMES[log.args.assetIndex ?? 0] ?? "Unknown",
-      vaultId: log.args.vaultId ?? "",
-      amount: (log.args.amount ?? BigInt(0)).toString()
-    }));
+    // Resolved markets indexed by (assetIndex, roundId) so we can flag a bet
+    // as Lost only if its specific round resolved.
+    const resolvedByAssetRound = new Map<string, { winningChoice: number }>();
+    for (const log of resolvedLogs) {
+      const k = `${log.args.assetIndex}-${log.args.roundId}`;
+      resolvedByAssetRound.set(k, { winningChoice: Number(log.args.winningChoice ?? 0) });
+    }
 
-    const winnings = winLogs.map((log) => ({
-      txHash: log.transactionHash,
-      blockNumber: Number(log.blockNumber),
-      assetIndex: log.args.assetIndex ?? 0,
-      assetName: ASSET_NAMES[log.args.assetIndex ?? 0] ?? "Unknown",
-      amount: (log.args.amount ?? BigInt(0)).toString()
-    }));
+    // ── Build bet entries with deterministic outcome correlation. ──
+    const bets: BetEntry[] = betLogs.map((log) => {
+      const assetIndex = Number(log.args.assetIndex ?? 0);
+      const roundId = String(log.args.roundId ?? "0");
+      const vaultId = String(log.args.vaultId ?? "");
+      const amount = (log.args.amount ?? 0n) as bigint;
 
-    const refunds = refundLogs.map((log) => ({
-      txHash: log.transactionHash,
-      blockNumber: Number(log.blockNumber),
-      assetIndex: log.args.assetIndex ?? 0,
-      assetName: ASSET_NAMES[log.args.assetIndex ?? 0] ?? "Unknown",
-      amount: (log.args.amount ?? BigInt(0)).toString()
-    }));
+      const win = winByVault.get(vaultId);
+      const refund = refundByVault.get(vaultId);
+      const resolved = resolvedByAssetRound.get(`${assetIndex}-${roundId}`);
 
-    const resolvedMarkets = resolvedLogs.map((log: any) => ({
-      txHash: log.transactionHash,
-      blockNumber: Number(log.blockNumber),
-      assetIndex: log.args.assetIndex ?? 0,
-      winningChoice: log.args.winningChoice?.toString() ?? "0",
-    }));
+      let status: BetEntry["status"] = "pending";
+      let payout = "—";
+      let choice = "🔒 Encrypted";
+
+      if (refund !== undefined) {
+        status = "refunded";
+        payout = `↩ ${refund.toString()}`;
+        choice = "⚠️ Decrypt failed";
+      } else if (win !== undefined) {
+        status = "won";
+        payout = `+${win.amount.toString()}`;
+        if (resolved) {
+          choice = resolved.winningChoice === 1 ? "⬆️ Up" : "⬇️ Down";
+        }
+      } else if (resolved) {
+        // Round resolved, no win/refund event for this vault → user lost.
+        status = "lost";
+        payout = `-${amount.toString()}`;
+        choice = resolved.winningChoice === 1 ? "⬇️ Down" : "⬆️ Up";
+      }
+
+      return {
+        txHash: log.transactionHash ?? "",
+        blockNumber: Number(log.blockNumber ?? 0),
+        assetIndex,
+        assetName: ASSET_NAMES[assetIndex] ?? "Unknown",
+        vaultId,
+        roundId,
+        amount: amount.toString(),
+        status,
+        payout,
+        choice
+      };
+    });
+
+    // Most recent first.
+    bets.sort((a, b) => b.blockNumber - a.blockNumber);
+
+    const totalWagered = bets.reduce((s, b) => s + BigInt(b.amount), 0n);
+    const totalWon = winLogs.reduce((s, l) => s + ((l.args.amount as bigint) ?? 0n), 0n);
+    const totalRefunded = refundLogs.reduce((s, l) => s + ((l.args.amount as bigint) ?? 0n), 0n);
 
     return NextResponse.json({
       bets,
-      winnings,
-      refunds,
-      resolvedMarkets,
       summary: {
         totalBets: bets.length,
-        totalWagered: bets.reduce((sum, b) => sum + BigInt(b.amount), BigInt(0)).toString(),
-        totalWon: winnings.reduce((sum, w) => sum + BigInt(w.amount), BigInt(0)).toString(),
-        totalRefunded: refunds.reduce((sum, r) => sum + BigInt(r.amount), BigInt(0)).toString()
+        totalWagered: totalWagered.toString(),
+        totalWon: totalWon.toString(),
+        totalRefunded: totalRefunded.toString()
       }
     });
   } catch (err) {
-    // Generic error message; no sensitive data exposed
-    return NextResponse.json(
-      { error: "Failed to fetch portfolio data" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to fetch portfolio data" }, { status: 500 });
   }
+}
+
+function emptySummary() {
+  return { totalBets: 0, totalWagered: "0", totalWon: "0", totalRefunded: "0" };
 }

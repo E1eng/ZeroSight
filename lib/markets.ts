@@ -3,8 +3,18 @@ export type MarketKey = "ip" | "btc" | "eth" | "ip_daily" | "btc_daily" | "eth_d
 /** Asset index matching the contract's feed config mapping (0-2 = Hourly, 3-5 = Daily). */
 export type AssetIndex = 0 | 1 | 2 | 3 | 4 | 5;
 
-/** Maps to the contract's MarketCategory enum (0 = Crypto, 1 = Sports, 2 = Politics). */
-export type MarketCategory = 0 | 1 | 2;
+/** Maps to the contract's MarketCategory enum (0..6). */
+export type MarketCategory = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export const CATEGORY_LABEL: Record<MarketCategory, string> = {
+  0: "Crypto",
+  1: "Sports",
+  2: "Politics",
+  3: "Esports",
+  4: "Economics",
+  5: "Entertainment",
+  6: "Other"
+};
 
 export interface MarketMeta {
   label: string;

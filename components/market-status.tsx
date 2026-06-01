@@ -1,77 +1,90 @@
+"use client";
+
 import { formatEther } from "viem";
 import { useEffect, useState } from "react";
+
 import { getMarketState } from "@/lib/market-contract";
 import type { AssetIndex } from "@/lib/markets";
 
+/**
+ * Live market status pill. Re-fetches on-chain state every 5s and ticks the
+ * countdown every second. The whole component is keyed on assetIndex by the
+ * parent; if you remount it (e.g. switching markets) the local state resets.
+ */
 export function MarketStatusDisplay({ assetIndex }: { assetIndex: AssetIndex }) {
-  const [status, setStatus] = useState<number>(0);
-  const [totalPool, setTotalPool] = useState<bigint>(BigInt(0));
+  // -1 represents "loading", so we never accidentally render Resolved or
+  // Betting Closed before the first fetch completes.
+  const [status, setStatus] = useState<number>(-1);
+  const [totalPool, setTotalPool] = useState<bigint>(0n);
   const [deadline, setDeadline] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState<number>(0);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let cancelled = false;
 
     async function fetchState() {
       try {
         const state = await getMarketState(assetIndex);
+        if (cancelled) return;
         setStatus(state.status as number);
         setTotalPool(state.totalPool as bigint);
         setDeadline(state.deadline || 0);
       } catch (err) {
-        console.error("Failed to fetch market state:", err);
+        if (!cancelled) {
+          // eslint-disable-next-line no-console
+          console.error("[MarketStatus] fetch failed", { assetIndex, err });
+        }
       }
     }
 
     fetchState();
-    interval = setInterval(fetchState, 5000); // Poll every 5s
-
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchState, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [assetIndex]);
 
-  // Tick the countdown every second
   useEffect(() => {
     if (status !== 0 || deadline === 0) {
       setTimeLeft(0);
       return;
     }
-
-    function tick() {
+    const tick = () => {
       const now = Math.floor(Date.now() / 1000);
       const diff = deadline - now;
       setTimeLeft(diff > 0 ? diff : 0);
-    }
-
+    };
     tick();
-    const timer = setInterval(tick, 1000);
-
-    return () => clearInterval(timer);
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
   }, [status, deadline]);
 
-  const getStatusConfig = () => {
-    switch (status) {
-      case 0: // Open
-        if (timeLeft > 0) {
-          const minutes = Math.floor(timeLeft / 60);
-          const seconds = timeLeft % 60;
-          return {
-            label: `Closes in ${minutes}m ${seconds}s`,
-            color: "bg-emerald-500",
-            text: "text-emerald-400 font-mono"
-          };
-        } else {
-          return { label: "Betting Closed", color: "bg-zinc-500", text: "text-zinc-400" };
-        }
-      case 1: // Locked
-        return { label: "Market Locked", color: "bg-amber-500", text: "text-amber-400" };
-      case 2: // Resolved
-        return { label: "Resolved", color: "bg-zinc-500", text: "text-zinc-400" };
-      default:
-        return { label: "Unknown", color: "bg-zinc-500", text: "text-zinc-400" };
+  const config = (() => {
+    if (status === -1) {
+      return { label: "Loading…", color: "bg-zinc-600", text: "text-zinc-500" };
     }
-  };
+    if (status === 0) {
+      if (timeLeft > 0) {
+        const m = Math.floor(timeLeft / 60);
+        const s = timeLeft % 60;
+        return {
+          label: `Closes in ${m}m ${s}s`,
+          color: "bg-emerald-500",
+          text: "text-emerald-400 font-mono"
+        };
+      }
+      return { label: "Betting Closed", color: "bg-zinc-500", text: "text-zinc-400" };
+    }
+    if (status === 1) {
+      return { label: "Market Locked", color: "bg-amber-500", text: "text-amber-400" };
+    }
+    if (status === 2) {
+      return { label: "Resolved", color: "bg-zinc-500", text: "text-zinc-400" };
+    }
+    return { label: "Unknown", color: "bg-zinc-500", text: "text-zinc-400" };
+  })();
 
-  const config = getStatusConfig();
   const poolFormatted = formatEther(totalPool);
 
   return (

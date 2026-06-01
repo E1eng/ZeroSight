@@ -49,14 +49,22 @@ export async function POST(req: Request) {
       apiUrl: STORY_API_URL,
     });
 
-    console.log(`Writing to gasless CDR vault ${uuid}...`);
+    const uuidNum = Number(uuid);
+    if (!Number.isSafeInteger(uuidNum) || uuidNum < 0 || uuidNum > 0xffffffff) {
+      return NextResponse.json(
+        { error: `uuid ${uuid} out of uint32 range` },
+        { status: 400 }
+      );
+    }
+
+    console.log(`Writing to gasless CDR vault ${uuidNum}...`);
     const writeResult = await cdrClient.uploader.write({
-      uuid: BigInt(uuid),
+      uuid: uuidNum,
       accessAuxData: "0x",
       encryptedData: encryptedDataHex,
     });
 
-    console.log(`Vault ${uuid} written successfully!`);
+    console.log(`Vault ${uuidNum} written successfully!`);
 
     return NextResponse.json({
       txHash: writeResult.txHash,
