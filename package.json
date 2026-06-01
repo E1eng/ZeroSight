@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "prepare": "husky install",
-    "keeper": "npx tsx script/markets/keeper-bot.ts"
+    "keeper": "npx tsx script/markets/keeper-bot.ts",
+    "keeper:pm2": "pm2 start ecosystem.config.cjs",
+    "keeper:pm2:logs": "pm2 logs zerosight-keeper",
+    "keeper:pm2:stop": "pm2 stop zerosight-keeper"
   },
   "dependencies": {
     "@piplabs/cdr-sdk": "^0.2.1",

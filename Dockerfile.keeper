@@ -1,0 +1,25 @@
+# Keeper bot container. Node 22 (CDR file storage / helia needs 22+).
+FROM node:22-slim
+
+WORKDIR /app
+
+# Install deps first for better layer caching.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=optional
+
+# App source (only what the keeper needs).
+COPY tsconfig.json ./
+COPY lib ./lib
+COPY script ./script
+
+ENV NODE_ENV=production
+ENV KEEPER_HEALTH_PORT=8787
+
+EXPOSE 8787
+
+# Container-level healthcheck hits the keeper's /health endpoint.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://localhost:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# Run via tsx. Docker's restart policy (e.g. --restart=unless-stopped) handles crashes.
+CMD ["npx", "tsx", "script/markets/keeper-bot.ts"]

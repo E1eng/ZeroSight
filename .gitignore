@@ -31,6 +31,6 @@ lib/forge-std
 # Misc
 *.log
 
-# Tests
-__tests__/
-test/
+# PM2
+.pm2/
+keeper.log

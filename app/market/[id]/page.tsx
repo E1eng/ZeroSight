@@ -14,6 +14,7 @@ import { placeBetOnChain, getMarketState } from "@/lib/market-contract";
 import { STORY_CAIP_ID, STORY_CHAIN_ID } from "@/lib/story";
 import { useBets } from "@/hooks/use-bets";
 import { MyBets } from "@/components/my-bets";
+import { useToast } from "@/components/toast";
 
 const directions = [
   { label: "Up", value: 1 },
@@ -94,6 +95,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
 
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
+  const toast = useToast();
 
   // Read direction query param if coming from card click
   useEffect(() => {
@@ -168,6 +170,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     }
 
     setIsSubmitting(true);
+    const toastId = toast.loading("Encrypting bet payload and uploading to Story CDR…");
     setStatusMessage("Encrypting bet payload and uploading to Story CDR…");
 
     try {
@@ -199,9 +202,12 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         payload: payloadBytes
       });
 
-      setStatusMessage(
-        `Secured bet in encrypted vault #${result.uuid}. Broadcasting bet…`
+      toast.update(
+        toastId,
+        "loading",
+        `Vault #${result.uuid} secured. Confirm the bet in your wallet…`
       );
+      setStatusMessage(`Secured bet in encrypted vault #${result.uuid}. Broadcasting bet…`);
 
       const betTx = await placeBetOnChain({
         wallet: walletAdapter,
@@ -219,6 +225,11 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         txHash: betTx
       });
 
+      toast.update(
+        toastId,
+        "success",
+        `Bet placed 🔒 — encrypted vault #${result.uuid}. Tx ${betTx.slice(0, 10)}…`
+      );
       setStatusMessage(`Encrypted vault #${result.uuid}. Bet tx: ${betTx}`);
     } catch (error) {
       console.error("Failed to encrypt bet", error);
@@ -226,6 +237,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         error instanceof Error
           ? error.message
           : "Failed to encrypt bet. Please check console for details.";
+      toast.update(toastId, "error", message);
       setStatusMessage(message);
     } finally {
       setIsSubmitting(false);
@@ -240,7 +252,8 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     amount,
     activeMetadata.feedAddress,
     activeMetadata.assetIndex,
-    addBet
+    addBet,
+    toast
   ]);
 
   const targetPrice = marketState.openingPrice ? getTargetPrice(activeMetadata.assetIndex, marketState.openingPrice) : 0;

@@ -18,8 +18,35 @@ const contractAddress = requireEnv("NEXT_PUBLIC_ZERO_SIGHT_MARKET_ADDRESS");
 const privateKey = (process.env.MARKET_OPERATOR_PRIVATE_KEY ??
   requireEnv("DEPLOYER_PRIVATE_KEY")) as `0x${string}`;
 
+/**
+ * RPC endpoints with failover. Primary first, then any comma-separated
+ * fallbacks from STORY_RPC_FALLBACKS. A FallbackProvider rotates automatically
+ * when one endpoint errors or stalls, so a single RPC outage no longer halts
+ * the keeper.
+ */
+const fallbackUrls = (process.env.STORY_RPC_FALLBACKS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const allRpcUrls = [rpcUrl, ...fallbackUrls];
+
+function buildProvider(): ethers.providers.BaseProvider {
+  if (allRpcUrls.length === 1) {
+    return new ethers.providers.JsonRpcProvider(rpcUrl);
+  }
+  // Each endpoint gets equal weight; quorum 1 = first healthy response wins.
+  const configs = allRpcUrls.map((url, i) => ({
+    provider: new ethers.providers.JsonRpcProvider(url),
+    priority: i + 1,
+    stallTimeout: 5000,
+    weight: 1
+  }));
+  return new ethers.providers.FallbackProvider(configs, 1);
+}
+
 // ─── ethers (used by Redstone WrapperBuilder which only supports ethers v5) ──
-export const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+export const provider = buildProvider();
 export const ethersWallet = new ethers.Wallet(privateKey, provider);
 export const ethersContract = new ethers.Contract(
   contractAddress,

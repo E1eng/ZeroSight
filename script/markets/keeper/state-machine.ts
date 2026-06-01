@@ -1,5 +1,6 @@
 import { CATEGORY_LABELS } from "../utils";
 import type { AssetIndex } from "../utils";
+import { alert } from "./alert";
 import { decryptVault, listUnrevealedBets } from "./decrypt";
 import { log } from "./logger";
 import { getBettors, getChainNow, getMarketSnapshot } from "./onchain-read";
@@ -232,5 +233,11 @@ function finishWithError(state: AssetState, label: string, err: unknown, now: nu
     op: label,
     cooldownUntil: state.cooldownUntil,
     err: state.lastError
+  });
+  // Fire-and-forget alert for fee/settlement-critical ops; rate-limited inside.
+  void alert(`tx.${label}.${state.key}`, `Keeper op failed: ${label}`, {
+    asset: state.key,
+    index: state.index,
+    error: state.lastError
   });
 }

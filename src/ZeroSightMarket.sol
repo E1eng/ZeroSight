@@ -9,21 +9,20 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {RedstoneConsumerNumericBase} from "@redstone-finance/evm-connector/contracts/core/RedstoneConsumerNumericBase.sol";
 
 /**
- * @title ZeroSightMarket V2
+ * @title ZeroSightMarket V3
  * @notice Blind parimutuel prediction market secured by Story Protocol CDR.
  *
- * V2 changes (UUPS upgrade — storage append-only, struct layouts unchanged):
- *  - Per-asset roundId counter (currentRoundId).
- *  - vaultId emitted in WinningsDistributed / WinningsDistributionFailed / BetRefunded
- *    so off-chain indexers can match BetPlaced ↔ outcome 1:1.
- *  - roundId emitted in BetPlaced / MarketOpened / ChoicesRevealed / MarketLocked /
- *    MarketResolved / WinningsDistributed / BetRefunded.
- *  - New event MarketOpened — required for round-aware indexing.
- *  - Per-asset configurable targetBps (was hardcoded per assetIndex).
- *  - MarketCategory enum extended (Esports, Economics, Entertainment, Other).
- *  - Daily-market feeds (asset 3-5) and targetBps seeded via migrateV2.
- *  - setFeedConfig now goes through validated _setFeedConfig.
- *  - Storage gap reserved for future upgrades.
+ * V2 changes:
+ *  - Per-asset roundId counter; vaultId+roundId emitted in events for exact
+ *    off-chain bet↔outcome correlation. MarketOpened event. Per-asset
+ *    configurable targetBps. Daily feeds seeded. Keeper/treasury role split.
+ *
+ * V3 changes (UUPS upgrade — storage append-only):
+ *  - Emergency pause: owner can halt placeBet. Implemented with a single
+ *    APPENDED storage bool (NOT PausableUpgradeable) — inheriting an upgradeable
+ *    base mid-list would shift all subsequent storage slots and corrupt state.
+ *  - Oracle staleness guard: resolveMarket rejects prices reported with a
+ *    timestamp older than `maxOracleDelaySeconds`.
  */
 contract ZeroSightMarket is
     Initializable,
@@ -122,8 +121,17 @@ contract ZeroSightMarket is
     /// @notice Recipient of the 2% protocol fee. Defaults to owner if unset.
     address public treasury;
 
-    /// @dev Reserved storage gap for future upgrades (50 - 4 used = 46).
-    uint256[46] private __gap;
+    /// @notice Max age (seconds) of a Redstone price accepted by resolveMarket.
+    ///         0 = disabled (back-compat for pre-V3 state).
+    uint256 public maxOracleDelaySeconds;
+
+    /// @notice Manual pause flag (V3). Appended after V2 storage; we do NOT
+    ///         inherit PausableUpgradeable because adding a base contract
+    ///         mid-inheritance would shift all later storage slots.
+    bool private _paused;
+
+    /// @dev Reserved storage gap for future upgrades (50 - 6 used = 44).
+    uint256[44] private __gap;
 
     // ──────────────────────────── Events ───────────────────────────
 
@@ -187,6 +195,9 @@ contract ZeroSightMarket is
     event OracleConfigUpdated(uint8 uniqueSignersThreshold, address[] signers);
     event KeeperUpdated(address indexed oldKeeper, address indexed newKeeper);
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
+    event MaxOracleDelayUpdated(uint256 oldValue, uint256 newValue);
+    event Paused(address account);
+    event Unpaused(address account);
 
     // ──────────────────────────── Modifiers ────────────────────────
 
@@ -207,6 +218,11 @@ contract ZeroSightMarket is
 
     modifier onlyKeeperOrOwner() {
         require(msg.sender == keeper || msg.sender == owner(), "Not keeper or owner");
+        _;
+    }
+
+    modifier whenNotPaused() {
+        require(!_paused, "Paused");
         _;
     }
 
@@ -290,6 +306,17 @@ contract ZeroSightMarket is
         _setTreasury(treasuryAddr == address(0) ? owner() : treasuryAddr);
     }
 
+    /**
+     * @notice One-time migration after upgrading proxy from V2 to V3.
+     *         Initialises Pausable and sets the oracle staleness window.
+     * @param maxOracleDelaySecs Max accepted age of a Redstone price in
+     *        resolveMarket (e.g. 180). Pass 0 to disable the check.
+     */
+    function migrateV3(uint256 maxOracleDelaySecs) external reinitializer(3) onlyOwner {
+        maxOracleDelaySeconds = maxOracleDelaySecs;
+        emit MaxOracleDelayUpdated(0, maxOracleDelaySecs);
+    }
+
     // ──────────────────────────── UUPS ─────────────────────────────
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
@@ -303,7 +330,7 @@ contract ZeroSightMarket is
     function placeBet(
         string memory vaultId,
         uint8 assetIndex
-    ) external payable validAsset(assetIndex) onlyWhileOpen(assetIndex) {
+    ) external payable validAsset(assetIndex) whenNotPaused onlyWhileOpen(assetIndex) {
         require(bytes(vaultId).length > 0, "Vault required");
         require(bytes(vaultId).length <= 78, "Vault too long"); // uint256 max ASCII length
         require(msg.value >= MIN_BET, "Min bet 0.01 IP");
@@ -630,6 +657,31 @@ contract ZeroSightMarket is
         _setTreasury(newTreasury);
     }
 
+    /// @notice Emergency halt of new bets. Lifecycle ops (reveal/resolve/
+    ///         distribute) keep working so in-flight rounds settle cleanly.
+    function pause() external onlyOwner {
+        _paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /// @notice Resume betting.
+    function unpause() external onlyOwner {
+        _paused = false;
+        emit Unpaused(msg.sender);
+    }
+
+    /// @notice Whether new bets are currently halted.
+    function paused() external view returns (bool) {
+        return _paused;
+    }
+
+    /// @notice Set max accepted Redstone price age (seconds). 0 disables.
+    function setMaxOracleDelay(uint256 newValue) external onlyOwner {
+        uint256 old = maxOracleDelaySeconds;
+        maxOracleDelaySeconds = newValue;
+        emit MaxOracleDelayUpdated(old, newValue);
+    }
+
     // ──────────────────────────── Redstone Overrides ───────────────
 
     function getDataServiceId() public pure override returns (string memory) {
@@ -647,6 +699,27 @@ contract ZeroSightMarket is
 
     function getUniqueSignersThreshold() public view override returns (uint8) {
         return uniqueSignersThreshold;
+    }
+
+    /**
+     * @notice Reject prices whose Redstone package timestamp is older than
+     *         `maxOracleDelaySeconds` (when set). Falls back to Redstone's
+     *         default bounds when disabled (value 0).
+     * @param receivedTimestampMilliseconds package timestamp in ms.
+     */
+    function validateTimestamp(uint256 receivedTimestampMilliseconds) public view virtual override {
+        if (maxOracleDelaySeconds == 0) {
+            super.validateTimestamp(receivedTimestampMilliseconds);
+            return;
+        }
+        uint256 receivedSecs = receivedTimestampMilliseconds / 1000;
+        // Reject stale data.
+        if (block.timestamp > receivedSecs) {
+            require(block.timestamp - receivedSecs <= maxOracleDelaySeconds, "Oracle price stale");
+        } else {
+            // Future timestamp tolerance: reuse the same window.
+            require(receivedSecs - block.timestamp <= maxOracleDelaySeconds, "Oracle ts in future");
+        }
     }
 
     // ──────────────────────────── Internal ─────────────────────────

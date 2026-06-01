@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PropsWithChildren, useMemo, useState } from "react";
 
 import { STORY_TESTNET_CHAIN } from "@/lib/story";
+import { ToastProvider } from "@/components/toast";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 const DEFAULT_PRIVY_APP_ID = "PRIVY_APP_ID_PLACEHOLDER";
 
@@ -25,7 +27,11 @@ export function Providers({ children }: PropsWithChildren) {
         defaultChain: STORY_TESTNET_CHAIN
       }}
     >
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <ErrorBoundary>{children}</ErrorBoundary>
+        </ToastProvider>
+      </QueryClientProvider>
     </PrivyProvider>
   );
 }
