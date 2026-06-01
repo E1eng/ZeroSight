@@ -138,12 +138,12 @@ export async function tickAsset(state: AssetState): Promise<void> {
     // Reveal a small batch per tick while there's still anything to decrypt
     // AND we still have time before the resolve window. This spreads CDR load
     // across the locked window instead of one giant blocking decrypt.
-    if (remaining.length > 0 && now < resolveAt(snap.deadline)) {
+    if (remaining.length > 0 && now < resolveAt(snap.deadline, state.index)) {
       await revealBatch(state, remaining, now);
       return;
     }
 
-    if (now >= resolveAt(snap.deadline)) {
+    if (now >= resolveAt(snap.deadline, state.index)) {
       if (remaining.length > 0) {
         // Last-chance reveal right before resolving; whatever still fails will
         // be refunded by the contract during distribution.
@@ -164,7 +164,7 @@ export async function tickAsset(state: AssetState): Promise<void> {
     state.phase = "revealed";
     log.debug("phase.lockedIdle", {
       ...ctx,
-      resolvesIn: resolveAt(snap.deadline) - now
+      resolvesIn: resolveAt(snap.deadline, state.index) - now
     });
     return;
   }

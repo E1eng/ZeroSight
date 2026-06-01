@@ -1,42 +1,40 @@
 /**
  * Deadline scheduling. ALL math is in UTC seconds — never local timezone.
- * Hourly markets close at minute 50 of each UTC hour.
- * Daily markets close at 23:50 UTC.
+ *
+ * Hourly markets: a short rolling cycle for fast testing/demo. Defaults to a
+ *   5-minute cycle = 4 min open + 1 min locked window. Override via env:
+ *     HOURLY_OPEN_SECONDS  (default 240)
+ *     HOURLY_LOCK_SECONDS  (default 60)
+ *
+ * Daily markets: wall-clock aligned — close at 23:50 UTC, resolve 10 min later.
  */
 
 import type { AssetIndex } from "../utils";
 
-const HOURLY_CLOSE_MINUTE = 50;
+const HOURLY_OPEN_SECONDS = Number(process.env.HOURLY_OPEN_SECONDS ?? "240"); // 4 min
+const HOURLY_LOCK_SECONDS = Number(process.env.HOURLY_LOCK_SECONDS ?? "60"); // 1 min
+
 const DAILY_CLOSE_HOUR_UTC = 23;
 const DAILY_CLOSE_MINUTE_UTC = 50;
+const DAILY_LOCK_SECONDS = 10 * 60; // 10 min
+
+function isDaily(assetIndex: AssetIndex): boolean {
+  return assetIndex >= 3;
+}
 
 /**
- * Given chain `now` (unix seconds), returns the next "close" deadline (unix
- * seconds) for the asset's cadence. Falls back to a sensible default offset
- * if scheduling math somehow lands in the past.
+ * Given chain `now` (unix seconds), returns the next betting deadline (unix
+ * seconds) for the asset's cadence.
+ *
+ * Hourly uses a simple rolling offset (now + open window) so cycles are short
+ * and predictable for testing. Daily snaps to the next 23:50 UTC boundary.
  */
 export function nextDeadline(assetIndex: AssetIndex, chainNow: number): number {
-  const isDaily = assetIndex >= 3;
-  const nowMs = chainNow * 1000;
-
-  if (!isDaily) {
-    // Hourly slot: minute 50 of the current UTC hour, or next hour if we're past it.
-    const d = new Date(nowMs);
-    const candidate = Date.UTC(
-      d.getUTCFullYear(),
-      d.getUTCMonth(),
-      d.getUTCDate(),
-      d.getUTCHours(),
-      HOURLY_CLOSE_MINUTE,
-      0,
-      0
-    );
-    let target = candidate;
-    if (target <= nowMs) target += 60 * 60 * 1000; // bump to next hour
-    return Math.floor(target / 1000);
+  if (!isDaily(assetIndex)) {
+    return chainNow + HOURLY_OPEN_SECONDS;
   }
 
-  // Daily slot: 23:50 UTC of today, or tomorrow if we're past it.
+  const nowMs = chainNow * 1000;
   const d = new Date(nowMs);
   let target = Date.UTC(
     d.getUTCFullYear(),
@@ -52,10 +50,9 @@ export function nextDeadline(assetIndex: AssetIndex, chainNow: number): number {
 }
 
 /**
- * Resolve window: 10 minutes after deadline. Resolve before this is wasted gas
- * since `block.timestamp > deadline` must be true and we want a small buffer
- * for re-org / RPC drift.
+ * When to resolve: deadline + lock window. Hourly = short (1 min default),
+ * daily = 10 min. This is the gap between betting cutoff and price settlement.
  */
-export function resolveAt(deadline: number): number {
-  return deadline + 10 * 60;
+export function resolveAt(deadline: number, assetIndex: AssetIndex): number {
+  return deadline + (isDaily(assetIndex) ? DAILY_LOCK_SECONDS : HOURLY_LOCK_SECONDS);
 }

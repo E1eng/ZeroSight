@@ -377,7 +377,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-col gap-1">
                 <span className="text-sm font-bold text-zinc-200">
-                  {cleanLabel}/USD <span className="text-neon animate-pulse">● LIVE</span>
+                  {cleanLabel}/USDT <span className="text-neon animate-pulse">● LIVE</span>
                 </span>
                 <span className="text-3xl font-mono font-bold text-white tracking-tight mt-1">
                   {latestPriceFormatted}
