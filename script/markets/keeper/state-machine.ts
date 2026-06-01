@@ -17,6 +17,13 @@ import type { AssetState } from "./types";
 const COOLDOWN_AFTER_ERROR_SEC = 30;
 const DISTRIBUTE_BATCH_SIZE = 50;
 
+// How many vaults to decrypt + reveal per tick. The locked window (deadline →
+// deadline+10min) is used as a staggered decryption window: each tick chips
+// away a small batch instead of blocking the whole keeper loop on one asset
+// while it decrypts every vault at once. CDR decryption is slow (validator
+// round-trips), so small batches keep all 6 markets progressing in parallel.
+const REVEAL_BATCH_SIZE = 8;
+
 /**
  * Single tick of the keeper for one asset. Stateless w.r.t. the chain — every
  * decision is driven by a fresh `MarketSnapshot` so we do not get out of sync
@@ -108,25 +115,42 @@ export async function tickAsset(state: AssetState): Promise<void> {
     return;
   }
 
-  // ── Phase 3: DEADLINE PASSED, status still Open → reveal+lock ──────
+  // ── Phase 3: DEADLINE PASSED, status still Open → lock immediately ──
+  // Locking is a cheap instant tx; we do NOT block it on slow CDR decryption.
+  // Once locked, the staggered reveal happens during the locked window below.
   if (snap.status === 0 && now >= snap.deadline) {
     state.phase = "locking";
-    await runReveal(state, now);
+    try {
+      await lockMarketTx(state.index);
+      state.phase = "revealing";
+      log.info("phase.locked", { ...ctx, round: snap.currentRoundId });
+    } catch (err) {
+      return finishWithError(state, "lockMarket", err, now);
+    }
     return;
   }
 
-  // ── Phase 4: LOCKED → reveal lingering, then resolve at +10min ─────
+  // ── Phase 4: LOCKED → staggered reveal, then resolve at +10min ─────
   if (snap.status === 1) {
-    // It's possible some bets weren't revealed in the prior tick (CDR slow).
     const bettors = await getBettors(state.index);
     const remaining = await listUnrevealedBets(state.index, bettors);
-    if (remaining.length > 0) {
-      log.info("phase.lingerReveal", { ...ctx, remaining: remaining.length });
-      await runReveal(state, now);
+
+    // Reveal a small batch per tick while there's still anything to decrypt
+    // AND we still have time before the resolve window. This spreads CDR load
+    // across the locked window instead of one giant blocking decrypt.
+    if (remaining.length > 0 && now < resolveAt(snap.deadline)) {
+      await revealBatch(state, remaining, now);
       return;
     }
 
     if (now >= resolveAt(snap.deadline)) {
+      if (remaining.length > 0) {
+        // Last-chance reveal right before resolving; whatever still fails will
+        // be refunded by the contract during distribution.
+        log.info("phase.finalReveal", { ...ctx, remaining: remaining.length });
+        await revealBatch(state, remaining, now);
+        return;
+      }
       log.info("phase.resolving", { ...ctx, deadline: snap.deadline });
       try {
         await resolveMarketTx(state.index);
@@ -138,7 +162,7 @@ export async function tickAsset(state: AssetState): Promise<void> {
     }
 
     state.phase = "revealed";
-    log.debug("phase.locked", {
+    log.debug("phase.lockedIdle", {
       ...ctx,
       resolvesIn: resolveAt(snap.deadline) - now
     });
@@ -146,42 +170,26 @@ export async function tickAsset(state: AssetState): Promise<void> {
   }
 }
 
-async function runReveal(state: AssetState, now: number) {
+/**
+ * Decrypt + reveal up to REVEAL_BATCH_SIZE vaults this tick. Bets that fail to
+ * decrypt are skipped (left unrevealed → refunded at distribution). Submits a
+ * single revealChoices tx for whatever decrypted successfully this batch.
+ */
+async function revealBatch(
+  state: AssetState,
+  unrevealed: { bettor: string; vaultId: string }[],
+  now: number
+) {
   const ctx = { asset: state.key, index: state.index };
-  const bettors = await getBettors(state.index);
+  const batch = unrevealed.slice(0, REVEAL_BATCH_SIZE);
 
-  if (bettors.length === 0) {
-    // No bettors at all in this round — just lock if still Open.
-    if (state.snapshot?.status === 0) {
-      log.info("phase.lockEmpty", ctx);
-      try {
-        await lockMarketTx(state.index);
-      } catch (err) {
-        return finishWithError(state, "lockMarket", err, now);
-      }
-    }
-    return;
-  }
+  log.info("decrypt.batch", { ...ctx, batch: batch.length, remaining: unrevealed.length });
 
-  const unrevealed = await listUnrevealedBets(state.index, bettors);
-  if (unrevealed.length === 0) {
-    // Nothing left to reveal — lock if still open.
-    if (state.snapshot?.status === 0) {
-      try {
-        await lockMarketTx(state.index);
-      } catch (err) {
-        return finishWithError(state, "lockMarket", err, now);
-      }
-    }
-    return;
-  }
-
-  log.info("decrypt.batch", { ...ctx, count: unrevealed.length });
   const revealedBettors: string[] = [];
   const revealedVaults: string[] = [];
   const revealedChoices: number[] = [];
 
-  for (const item of unrevealed) {
+  for (const item of batch) {
     const result = await decryptVault(item.vaultId, item.bettor);
     if (result === null) continue; // stays unrevealed → refunded later
     revealedBettors.push(item.bettor);
@@ -191,20 +199,13 @@ async function runReveal(state: AssetState, now: number) {
 
   log.info("decrypt.summary", {
     ...ctx,
-    attempted: unrevealed.length,
+    attempted: batch.length,
     decrypted: revealedBettors.length,
-    failed: unrevealed.length - revealedBettors.length
+    failed: batch.length - revealedBettors.length
   });
 
   if (revealedBettors.length === 0) {
-    // CDR all failed — fall back to lock so distribute can refund.
-    if (state.snapshot?.status === 0) {
-      try {
-        await lockMarketTx(state.index);
-      } catch (err) {
-        return finishWithError(state, "lockMarket", err, now);
-      }
-    }
+    // Nothing decrypted this batch (all failed). Next tick retries the rest.
     return;
   }
 
@@ -215,7 +216,7 @@ async function runReveal(state: AssetState, now: number) {
       vaultIds: revealedVaults,
       choices: revealedChoices
     });
-    state.phase = "revealed";
+    state.phase = "revealing";
   } catch (err) {
     return finishWithError(state, "revealChoices", err, now);
   }

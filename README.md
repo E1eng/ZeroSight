@@ -30,10 +30,13 @@ The on-chain contract only ever sees the **bet amount** and a **CDR vault UUID**
 ### Market lifecycle (per asset, per round)
 
 1. **Open** — `startNextMarket` snapshots the Redstone opening price, sets a deadline, and bumps `currentRoundId`. Users place encrypted bets.
-2. **Locked** — after the deadline the keeper decrypts each vault and submits `revealChoices`. Time-weighted shares (1x→2x linear decay toward the deadline) are computed on reveal.
-3. **Resolved** — 10 minutes after the deadline the keeper calls `resolveMarket`, which pulls the signed Redstone price, compares against the per-asset target threshold, sets the winning direction, and deducts the 2% protocol fee to the treasury.
-4. **Distributed** — `distributeWinnings` pays out winners in gas-bounded batches via push-safe low-level calls. Bets that failed to decrypt are automatically refunded in full.
-5. **Auto-restart** — once distribution completes, the keeper opens the next round.
+2. **Locked** — at the deadline the keeper calls `lockMarket` (a cheap, instant tx). Betting is closed.
+3. **Staggered reveal** — during the locked window (deadline → deadline+10min) the keeper decrypts vaults in **small batches per tick** and submits `revealChoices` incrementally. This spreads slow CDR decryption across the window instead of blocking on one giant decrypt, so all 6 markets keep progressing. Time-weighted shares (1x→2x linear decay toward the deadline) are computed on reveal.
+4. **Resolved** — 10 minutes after the deadline the keeper does a final reveal pass, then calls `resolveMarket`: it pulls the signed Redstone price, compares against the per-asset target threshold, sets the winning direction, and deducts the 2% protocol fee to the treasury.
+5. **Distributed** — `distributeWinnings` pays out winners in gas-bounded batches via push-safe low-level calls. Bets that never decrypted are refunded in full.
+6. **Auto-restart** — once distribution completes, the keeper opens the next round.
+
+> The deadline→resolve gap (betting closes at :50, price settles at :00) is intentional: it prevents betting with near-certainty right as the resolution candle closes. The keeper uses that window as its staggered decryption window.
 
 ---
 
