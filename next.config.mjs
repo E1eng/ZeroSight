@@ -2,6 +2,12 @@
 const nextConfig = {
   optimizeFonts: false,
   transpilePackages: ["@piplabs/cdr-sdk", "multiformats"],
+  images: {
+    // Local brand marks (IP/BTC/ETH) are trusted SVGs from /public/assets.
+    dangerouslyAllowSVG: true,
+    contentDispositionType: "attachment",
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;"
+  },
   experimental: {
     typedRoutes: true,
     serverComponentsExternalPackages: ["@piplabs/cdr-crypto"]

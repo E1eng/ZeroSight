@@ -14,6 +14,7 @@ import { getMarketState } from "@/lib/market-contract";
 import { createPublicClient, http } from "viem";
 import { MARKET_ABI } from "@/lib/abi";
 import { STORY_RPC_URL, STORY_TESTNET_CHAIN, ZERO_SIGHT_MARKET_ADDRESS } from "@/lib/story";
+import { AssetIcon } from "@/components/asset-icon";
 
 const publicClient = createPublicClient({
   chain: STORY_TESTNET_CHAIN,
@@ -134,8 +135,8 @@ export function MarketCard({ marketId }: MarketCardProps) {
         </div>
 
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-white/10 to-white/[0.02] text-xl font-bold text-white shadow-inner">
-            {cleanLabel === "IP" ? "IP" : cleanLabel === "BTC" ? "₿" : "Ξ"}
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-white/10 to-white/[0.02] shadow-inner">
+            <AssetIcon symbol={cleanLabel} size={34} />
           </div>
           <h3 className="text-sm font-semibold text-zinc-100 sm:text-base">{title}</h3>
         </div>

@@ -46,19 +46,26 @@ export function MarketStatusDisplay({ assetIndex }: { assetIndex: AssetIndex }) 
   }, [assetIndex]);
 
   useEffect(() => {
-    if (status !== 0 || deadline === 0) {
+    if (deadline === 0) {
       setTimeLeft(0);
       return;
     }
+    // For Open markets count down to the deadline; for Locked markets count
+    // down to the resolve moment (deadline + lock window). Hourly lock ≈60s,
+    // daily ≈600s — mirrors the keeper's schedule.
+    const isDaily = assetIndex >= 3;
+    const lockWindow = isDaily ? 600 : 60;
+    const target = status === 1 ? deadline + lockWindow : deadline;
+
     const tick = () => {
       const now = Math.floor(Date.now() / 1000);
-      const diff = deadline - now;
+      const diff = target - now;
       setTimeLeft(diff > 0 ? diff : 0);
     };
     tick();
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
-  }, [status, deadline]);
+  }, [status, deadline, assetIndex]);
 
   const config = (() => {
     if (status === -1) {
@@ -74,10 +81,19 @@ export function MarketStatusDisplay({ assetIndex }: { assetIndex: AssetIndex }) 
           text: "text-emerald-400 font-mono"
         };
       }
-      return { label: "Betting Closed", color: "bg-zinc-500", text: "text-zinc-400" };
+      return { label: "Betting closed", color: "bg-zinc-500", text: "text-zinc-400" };
     }
     if (status === 1) {
-      return { label: "Market Locked", color: "bg-amber-500", text: "text-amber-400" };
+      if (timeLeft > 0) {
+        const m = Math.floor(timeLeft / 60);
+        const s = timeLeft % 60;
+        return {
+          label: `Resolves in ${m}m ${s}s`,
+          color: "bg-amber-500",
+          text: "text-amber-400 font-mono"
+        };
+      }
+      return { label: "Resolving…", color: "bg-amber-500", text: "text-amber-400" };
     }
     if (status === 2) {
       return { label: "Resolved", color: "bg-zinc-500", text: "text-zinc-400" };

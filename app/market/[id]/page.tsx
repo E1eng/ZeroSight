@@ -5,6 +5,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { formatEther } from "viem";
 
 import { PriceChart } from "@/components/price-chart";
 import { MarketStatusDisplay } from "@/components/market-status";
@@ -13,8 +14,8 @@ import { createCdrClient, encryptPayload } from "@/lib/cdr";
 import { placeBetOnChain, getMarketState } from "@/lib/market-contract";
 import { STORY_CAIP_ID, STORY_CHAIN_ID } from "@/lib/story";
 import { useBets } from "@/hooks/use-bets";
-import { MyBets } from "@/components/my-bets";
 import { useToast } from "@/components/toast";
+import { AssetIcon } from "@/components/asset-icon";
 
 const directions = [
   { label: "Up", value: 1 },
@@ -76,11 +77,12 @@ export default function MarketPage({ params }: { params: { id: string } }) {
   const [amount, setAmount] = useState(0.1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [marketState, setMarketState] = useState<{ status: number; openedAt: number; openingPrice: number; deadline: number }>({
+  const [marketState, setMarketState] = useState<{ status: number; openedAt: number; openingPrice: number; deadline: number; totalPool: bigint }>({
     status: 0,
     openedAt: 0,
     openingPrice: 0,
-    deadline: 0
+    deadline: 0,
+    totalPool: BigInt(0)
   });
 
   const [currentTime, setCurrentTime] = useState<number>(Math.floor(Date.now() / 1000));
@@ -114,7 +116,8 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           status: state.status as number, 
           openedAt: state.openedAt,
           openingPrice: state.openingPrice || 0,
-          deadline: state.deadline || 0
+          deadline: state.deadline || 0,
+          totalPool: state.totalPool ?? BigInt(0)
         });
       } catch (e) {}
     }
@@ -135,11 +138,26 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     if (!walletAccount || walletAccount.type !== "wallet") return null;
     return walletAccount.address ?? null;
   }, [connectedWallet, user]);
-  const { localBets, addBet } = useBets(primaryWallet ?? undefined);
+  const { addBet } = useBets(primaryWallet ?? undefined);
   const walletDisplay = useMemo(() => {
     if (!primaryWallet) return null;
     return `${primaryWallet.slice(0, 6)}…${primaryWallet.slice(-4)}`;
   }, [primaryWallet]);
+
+  // True when a wallet is connected but not on the Story Aeneid chain.
+  const wrongNetwork = useMemo(() => {
+    if (!authenticated || !connectedWallet) return false;
+    return connectedWallet.chainId !== STORY_CAIP_ID;
+  }, [authenticated, connectedWallet]);
+
+  const handleSwitchNetwork = useCallback(async () => {
+    if (!connectedWallet) return;
+    try {
+      await connectedWallet.switchChain(STORY_CHAIN_ID);
+    } catch (err) {
+      toast.error("Could not switch network. Please switch to Story Aeneid in your wallet.");
+    }
+  }, [connectedWallet, toast]);
 
   const handleBet = useCallback(async () => {
     if (isClosed) {
@@ -259,6 +277,21 @@ export default function MarketPage({ params }: { params: { id: string } }) {
   const targetPrice = marketState.openingPrice ? getTargetPrice(activeMetadata.assetIndex, marketState.openingPrice) : 0;
   const targetPriceFormatted = targetPrice > 0 ? formatTargetPrice(activeMetadata.assetIndex, targetPrice) : "";
 
+  // Blind parimutuel: per-side shares are encrypted, so we can only bound the
+  // payout. Min ≈ your stake back (everyone on your side); max ≈ the whole pool
+  // (you're the lone winner). We surface the max as an upper bound + the pool
+  // size after your stake so the bet feels less blind.
+  const payoutPreview = useMemo(() => {
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const poolNow = Number(formatEther(marketState.totalPool));
+    const poolAfter = poolNow + amount;
+    return {
+      poolAfter,
+      maxPayout: poolAfter,
+      maxMultiple: amount > 0 ? poolAfter / amount : 0
+    };
+  }, [amount, marketState.totalPool]);
+
   const title = targetPriceFormatted
     ? `Will ${cleanLabel} close above ${targetPriceFormatted}?`
     : `${cleanLabel} direction ${activeMetadata.durationLabel === "Hourly" ? "for this hour?" : "for today?"}`;
@@ -271,11 +304,30 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         </Link>
       </div>
 
+      {wrongNetwork && (
+        <div className="mb-8 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-lg">⚠️</span>
+            <p>
+              You&apos;re connected to the wrong network. Switch to{" "}
+              <strong>Story Aeneid</strong> to place a bet.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSwitchNetwork}
+            className="shrink-0 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-black transition hover:bg-amber-400"
+          >
+            Switch to Story Aeneid
+          </button>
+        </div>
+      )}
+
       <div className="mb-10 flex flex-col gap-6">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#1A1A1A] text-3xl font-bold text-white shadow-inner">
-              {cleanLabel === "IP" ? "IP" : cleanLabel === "BTC" ? "₿" : "Ξ"}
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#1A1A1A] shadow-inner">
+              <AssetIcon symbol={cleanLabel} size={40} />
             </div>
             <div className="flex flex-col gap-2">
               <h1 className="text-3xl font-bold text-white">
@@ -313,72 +365,94 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           </button>
           
           {showDetails && (
-            <div className="mt-4 flex flex-col gap-4 rounded-xl bg-[#141414] p-6 text-sm text-zinc-400">
-              <p>
-                {activeMetadata.durationLabel === "Hourly"
-                  ? "Hourly binary prediction market. Closes for betting at minute 50 and resolves at minute 60 of the hour."
-                  : "Daily binary prediction market. Closes for betting at 23:50 (11:50 PM) and resolves at 00:00 (midnight) of the next day."}
-              </p>
-              
-              <p>
-                Resolves UP if the {cleanLabel} price increases by at least the target percentage relative to the opening price at resolution time, 
-                or DOWN if at or below.
-              </p>
-              
-              <div className="rounded-lg bg-white/5 p-3 text-xs">
-                <span className="mb-2 block font-bold text-zinc-300">Target Price Rules ({activeMetadata.durationLabel} Volatility standard):</span>
-                <ul className="list-inside list-disc space-y-1">
-                  {activeMetadata.durationLabel === "Hourly" ? (
-                    <>
-                      <li><strong>IP Target</strong>: UP if price increases by at least <strong>0.75%</strong></li>
-                      <li><strong>BTC Target</strong>: UP if price increases by at least <strong>0.25%</strong></li>
-                      <li><strong>ETH Target</strong>: UP if price increases by at least <strong>0.40%</strong></li>
-                    </>
-                  ) : (
-                    <>
-                      <li><strong>IP Target</strong>: UP if price increases by at least <strong>4.00%</strong></li>
-                      <li><strong>BTC Target</strong>: UP if price increases by at least <strong>1.50%</strong></li>
-                      <li><strong>ETH Target</strong>: UP if price increases by at least <strong>2.50%</strong></li>
-                    </>
-                  )}
-                </ul>
-              </div>
-              
-              <p>
-                Resolution source: Redstone Oracles on Story Aeneid Testnet ({activeMetadata.feedAddress}).<br />
-                Price data cryptographically signed by the Redstone Decentralized Oracle Network.
-              </p>
-              
-              <div className="mt-2 flex items-center gap-16">
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-zinc-500">MARKET ID</p>
-                  <p className="font-mono text-zinc-300">0x00000000000000000000</p>
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-zinc-500">CREATED</p>
-                  <p className="text-zinc-300">
-                    {marketState.openedAt > 0
-                      ? new Date(marketState.openedAt * 1000).toLocaleString("en-US", {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        })
-                      : "Sat, May 30, 09:50 PM"}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="mt-2">
-                <span className="rounded bg-white/10 px-2 py-1 text-xs font-bold text-zinc-300">
-                  {activeMetadata.label}
-                </span>
-              </div>
-              
-              <div className="mt-2 flex items-center gap-2 text-blue-400">
-                <span>⏱</span> Time-weighted betting enabled
-              </div>
+            <div className="mt-4 rounded-2xl border border-white/5 bg-[#141414] p-6">
+              {(() => {
+                const pctByIndex: Record<number, string> = {
+                  0: "0.75%",
+                  1: "0.25%",
+                  2: "0.40%",
+                  3: "4.00%",
+                  4: "1.50%",
+                  5: "2.50%"
+                };
+                const targetPct = pctByIndex[activeMetadata.assetIndex] ?? "—";
+                const createdLabel =
+                  marketState.openedAt > 0
+                    ? new Date(marketState.openedAt * 1000).toLocaleString("en-US", {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })
+                    : "Pending open";
+                const cards = [
+                  {
+                    icon: "🎯",
+                    label: "Resolution Rule",
+                    value: `UP if +${targetPct}`,
+                    hint: `${cleanLabel} must rise at least ${targetPct} vs the opening price, else DOWN.`
+                  },
+                  {
+                    icon: "🏁",
+                    label: "Opening Price",
+                    value:
+                      marketState.openingPrice > 0
+                        ? formatTargetPrice(activeMetadata.assetIndex, marketState.openingPrice / 1e8)
+                        : "Pending",
+                    hint: "Snapshot taken when the round opened."
+                  },
+                  {
+                    icon: "📈",
+                    label: "Target Price (UP)",
+                    value: targetPriceFormatted || "Pending",
+                    hint: "Win threshold for UP at resolution."
+                  },
+                  {
+                    icon: "🛰",
+                    label: "Resolution Source",
+                    value: "Redstone Oracle",
+                    hint: "Signed price feed on Story Aeneid testnet."
+                  },
+                  {
+                    icon: "⏱",
+                    label: "Cycle",
+                    value: activeMetadata.durationLabel,
+                    hint:
+                      activeMetadata.durationLabel === "Hourly"
+                        ? "Closes at minute 50, resolves at minute 60."
+                        : "Closes at 23:50 UTC, resolves at 00:00."
+                  },
+                  {
+                    icon: "📅",
+                    label: "Created",
+                    value: createdLabel,
+                    hint: "When this round opened for betting."
+                  }
+                ];
+                return (
+                  <>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {cards.map((card) => (
+                        <div
+                          key={card.label}
+                          className="rounded-xl border border-white/5 bg-white/[0.03] p-4 transition hover:border-white/10"
+                        >
+                          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                            <span className="text-sm">{card.icon}</span>
+                            {card.label}
+                          </div>
+                          <p className="font-mono text-sm font-semibold text-zinc-100">{card.value}</p>
+                          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{card.hint}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-4 break-all font-mono text-[11px] text-zinc-600">
+                      Feed: {activeMetadata.feedAddress}
+                    </p>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -417,7 +491,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
             )}
 
             <div>
-              <PriceChart market={market} openedAt={marketState.openedAt} />
+              <PriceChart market={market} openedAt={marketState.openedAt} targetPrice={targetPrice} />
             </div>
           </div>
         </section>
@@ -449,7 +523,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
                   className="w-full bg-transparent text-2xl font-semibold text-zinc-100 focus:outline-none disabled:opacity-50"
                   disabled={!authenticated || isSubmitting || isClosed}
                 />
-                <span className="text-sm uppercase tracking-[0.2em] text-zinc-500">STORY</span>
+                <span className="text-sm uppercase tracking-[0.2em] text-zinc-500">IP</span>
               </div>
             </div>
           </div>
@@ -482,6 +556,29 @@ export default function MarketPage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
+          {payoutPreview && !isClosed && (
+            <div className="rounded-2xl border border-white/10 bg-[#0B0B0B] p-4">
+              <div className="flex items-center justify-between text-xs">
+                <span className="uppercase tracking-[0.2em] text-zinc-500">Est. max payout</span>
+                <span className="font-mono text-sm font-semibold text-neon">
+                  {payoutPreview.maxPayout.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 4
+                  })}{" "}
+                  IP
+                </span>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+                Parimutuel upper bound based on the {payoutPreview.poolAfter.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 4
+                })}{" "}
+                IP pool after your stake. Actual payout depends on how the pool splits at
+                resolution.
+              </p>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handleBet}
@@ -506,9 +603,6 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           </div>
         </aside>
       </main>
-      <div className="mt-12 w-full">
-        <MyBets bets={localBets} />
-      </div>
     </div>
   );
 }

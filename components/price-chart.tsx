@@ -8,6 +8,8 @@ import type { MarketKey } from "@/lib/markets";
 type PriceChartProps = {
   market: MarketKey;
   openedAt?: number;
+  /** Resolution target price (UP threshold). Draws a neon reference line. */
+  targetPrice?: number;
 };
 
 type CoinGeckoResponse = {
@@ -21,7 +23,7 @@ function formatTimestamp(ts: number) {
   }).format(ts);
 }
 
-export function PriceChart({ market, openedAt }: PriceChartProps) {
+export function PriceChart({ market, openedAt, targetPrice }: PriceChartProps) {
   const { data, isLoading } = useQuery<{ cached: boolean; data: CoinGeckoResponse }>({
     queryKey: ["prices", market],
     queryFn: async () => {
@@ -56,7 +58,15 @@ export function PriceChart({ market, openedAt }: PriceChartProps) {
               </linearGradient>
             </defs>
             <XAxis dataKey="time" hide />
-            <YAxis domain={["dataMin", "dataMax"]} hide />
+            <YAxis
+              domain={[
+                (dataMin: number) =>
+                  targetPrice && targetPrice > 0 ? Math.min(dataMin, targetPrice) : dataMin,
+                (dataMax: number) =>
+                  targetPrice && targetPrice > 0 ? Math.max(dataMax, targetPrice) : dataMax
+              ]}
+              hide
+            />
             <Tooltip
               contentStyle={{
                 background: "rgba(15,15,18,0.8)",
@@ -78,11 +88,29 @@ export function PriceChart({ market, openedAt }: PriceChartProps) {
               dot={false}
             />
             {openedAt && openedAt > 0 && (
-              <ReferenceLine 
-                x={openedAt * 1000} 
-                stroke="#00ff9d" 
+              <ReferenceLine
+                x={openedAt * 1000}
+                stroke="rgba(255,255,255,0.35)"
                 strokeDasharray="3 3"
-                label={{ position: "insideTopLeft", value: "Market Opened", fill: "#00ff9d", fontSize: 12 }} 
+                label={{
+                  position: "insideTopLeft",
+                  value: "Opened",
+                  fill: "rgba(255,255,255,0.55)",
+                  fontSize: 11
+                }}
+              />
+            )}
+            {targetPrice && targetPrice > 0 && (
+              <ReferenceLine
+                y={targetPrice}
+                stroke="#BAFF00"
+                strokeDasharray="5 4"
+                label={{
+                  position: "insideTopRight",
+                  value: "Target",
+                  fill: "#BAFF00",
+                  fontSize: 11
+                }}
               />
             )}
           </AreaChart>

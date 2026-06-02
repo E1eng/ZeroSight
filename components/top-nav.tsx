@@ -32,18 +32,16 @@ export function TopNav() {
   }, [primaryWallet]);
 
   return (
-    <nav className="flex h-16 w-full items-center justify-between border-b border-white/10 bg-[#0B0B0B] px-6 lg:px-12">
-      <div className="flex items-center gap-8">
+    <nav className="sticky top-0 z-50 flex h-16 w-full items-center justify-between border-b border-white/10 bg-[#0B0B0B]/95 px-4 backdrop-blur-md sm:px-6 lg:px-12">
+      <div className="flex items-center gap-4 sm:gap-8">
         <Link href="/" className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neon">
-            <span className="font-bold text-black text-base leading-none">Z</span>
+            <span className="text-base font-bold leading-none text-black">Z</span>
           </div>
-          <span className="hidden text-sm font-bold tracking-[0.2em] text-zinc-100 sm:block">
-            ZEROSIGHT
-          </span>
+          <span className="text-sm font-bold tracking-[0.2em] text-zinc-100">ZEROSIGHT</span>
         </Link>
 
-        <div className="hidden items-center gap-6 text-sm font-bold tracking-wider text-zinc-400 lg:flex">
+        <div className="flex items-center gap-4 text-xs font-bold tracking-wider text-zinc-400 sm:gap-6 sm:text-sm">
           <Link
             href="/"
             className={`transition hover:text-white ${pathname === "/" ? "text-neon" : ""}`}
@@ -58,16 +56,13 @@ export function TopNav() {
           >
             PORTFOLIO
           </Link>
-          <span
-            className="cursor-not-allowed text-zinc-600"
-            title="Coming soon"
-          >
+          <span className="hidden cursor-not-allowed text-zinc-600 lg:inline" title="Coming soon">
             LEADERBOARDS · soon
           </span>
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 sm:gap-4">
         {ready && (
           <>
             {authenticated && walletDisplay && (
@@ -77,7 +72,7 @@ export function TopNav() {
             )}
             <button
               onClick={authenticated ? logout : login}
-              className="rounded-lg bg-neon px-5 py-2 text-sm font-bold tracking-wider text-black transition hover:bg-neon/90"
+              className="rounded-lg bg-neon px-4 py-2 text-xs font-bold tracking-wider text-black transition hover:bg-neon/90 sm:px-5 sm:text-sm"
             >
               {authenticated ? "SIGN OUT" : "LOGIN"}
             </button>

@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { useQuery } from "@tanstack/react-query";
 import { formatEther, parseEther } from "viem";
 import Link from "next/link";
 
 import { useBets } from "@/hooks/use-bets";
+import { AssetIcon } from "@/components/asset-icon";
 
 // ─── Types ───────────────────────────────────────────────────────
 interface BetEntry {
@@ -31,13 +33,13 @@ interface PortfolioData {
   };
 }
 
-const ASSET_ICONS: Record<number, string> = {
-  0: "🟣",
-  1: "🟠",
-  2: "🔵",
-  3: "🟣",
-  4: "🟠",
-  5: "🔵"
+const ASSET_SYMBOL: Record<number, string> = {
+  0: "IP",
+  1: "BTC",
+  2: "ETH",
+  3: "IP",
+  4: "BTC",
+  5: "ETH"
 };
 
 function shortenHash(hash: string) {
@@ -105,31 +107,33 @@ function StatCard({
 export default function PortfolioPage() {
   const { authenticated, login, ready } = usePrivy();
   const { wallets } = useWallets();
-  const [data, setData] = useState<PortfolioData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
   const walletAddress = wallets?.[0]?.address;
   const { localBets } = useBets(walletAddress);
 
-  const fetchPortfolio = useCallback(async () => {
-    if (!walletAddress) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/portfolio?address=${encodeURIComponent(walletAddress)}`);
-      if (!res.ok) throw new Error("Failed");
-      setData(await res.json());
-    } catch {
-      setError("Failed to load portfolio data. Please try again.");
-    } finally {
-      setLoading(false);
+  const {
+    data,
+    isLoading,
+    isFetching,
+    error: queryError,
+    refetch
+  } = useQuery<PortfolioData>({
+    queryKey: ["portfolio", walletAddress],
+    enabled: Boolean(walletAddress),
+    // Keep showing the last good data while refetching so the table never
+    // blanks out or flips bets back to "pending" mid-refresh.
+    placeholderData: (prev) => prev,
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    queryFn: async () => {
+      const res = await fetch(`/api/portfolio?address=${encodeURIComponent(walletAddress!)}`);
+      if (!res.ok) throw new Error("Failed to load portfolio");
+      return res.json();
     }
-  }, [walletAddress]);
+  });
 
-  useEffect(() => {
-    if (walletAddress) fetchPortfolio();
-  }, [walletAddress, fetchPortfolio]);
+  const loading = isLoading; // only the very first load shows the full spinner
+  const error = queryError ? "Failed to load portfolio data. Please try again." : "";
+  const fetchPortfolio = refetch;
 
   // Merge local pending bets (placed but not yet indexed by chain getLogs)
   // with server-correlated bets. Dedup by vaultId.
@@ -238,11 +242,11 @@ export default function PortfolioPage() {
           )}
         </div>
         <button
-          onClick={fetchPortfolio}
-          disabled={loading}
+          onClick={() => fetchPortfolio()}
+          disabled={isFetching}
           className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 disabled:opacity-50"
         >
-          <span className={loading ? "animate-spin" : ""}>↻</span> Refresh
+          <span className={isFetching ? "animate-spin" : ""}>↻</span> Refresh
         </button>
       </div>
 
@@ -311,7 +315,7 @@ export default function PortfolioPage() {
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          <span className="text-lg">{ASSET_ICONS[bet.assetIndex] ?? "⚪"}</span>
+                          <AssetIcon symbol={ASSET_SYMBOL[bet.assetIndex] ?? "?"} size={24} />
                           <span className="font-semibold text-zinc-200">{bet.assetName}</span>
                         </div>
                       </td>
@@ -375,7 +379,7 @@ export default function PortfolioPage() {
                 >
                   <div className="mb-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="text-lg">{ASSET_ICONS[bet.assetIndex] ?? "⚪"}</span>
+                      <AssetIcon symbol={ASSET_SYMBOL[bet.assetIndex] ?? "?"} size={24} />
                       <span className="font-semibold text-zinc-200">{bet.assetName}</span>
                     </div>
                     <StatusBadge status={bet.status} />
