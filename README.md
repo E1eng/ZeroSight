@@ -23,7 +23,6 @@ The on-chain contract only ever sees the **bet amount** and a **CDR vault UUID**
 | [docs/deployment.md](docs/deployment.md) | Fresh deploy + V1→V2→V3 upgrade commands and verification |
 | [docs/hosting.md](docs/hosting.md) | Frontend on Netlify + keeper on a VPS (PM2 / Docker) |
 | [docs/runbook.md](docs/runbook.md) | Ops: restart, pause, rotate keeper, settle stuck rounds |
-| [docs/demo-script.md](docs/demo-script.md) | Recordable 2–3 min product walkthrough |
 | [docs/security.md](docs/security.md) | Trust model, keeper limitation, planned trustless reveal (V4) |
 
 ## Quick start
@@ -66,6 +65,6 @@ npm run keeper:pm2        # prod (auto-restart via pm2)
 
 ## Deployed (Aeneid testnet)
 
-Proxy: `0x570288C778b6A3ecD22c517f327c7635d817dC2e` · Chain ID `1315`
+Proxy: `0x570288C77z8b6A3ecD22c517f327c7635d817dC2e` · Chain ID `1315`
 
 > Aeneid is testnet — not production-grade confidentiality. Don't store real secrets.
