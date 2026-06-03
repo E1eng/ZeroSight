@@ -281,7 +281,11 @@ export default function PortfolioPage() {
       )}
 
       {!loading && data && (
-        <div className="overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-br from-white/[0.02] to-transparent">
+        <div
+          className={`overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-br from-white/[0.02] to-transparent transition-opacity duration-300 ${
+            isFetching ? "opacity-60" : "opacity-100"
+          }`}
+        >
           <div className="hidden lg:block">
             <table className="w-full text-left text-sm">
               <thead>

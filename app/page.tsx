@@ -143,8 +143,25 @@ export default function Home() {
       </div>
 
       {visible.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-12 text-center text-zinc-500">
-          No markets match your filters. Try clearing the search or switching category.
+        <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-12 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-3xl">
+            🔍
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-zinc-300">No markets match your filters</p>
+            <p className="text-xs text-zinc-500">
+              Try a different search term or switch back to all categories.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setSearch("");
+              setCategory("ALL");
+            }}
+            className="rounded-full bg-neon px-5 py-2 text-xs font-bold tracking-wider text-black transition hover:bg-neon/90"
+          >
+            CLEAR FILTERS
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

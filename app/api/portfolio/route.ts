@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, getAbiItem, http } from "viem";
 
 import { MARKET_ABI } from "@/lib/abi";
 import { STORY_RPC_URL, STORY_TESTNET_CHAIN, ZERO_SIGHT_MARKET_ADDRESS } from "@/lib/story";
@@ -23,15 +23,12 @@ function isValidAddress(addr: string): addr is `0x${string}` {
   return /^0x[0-9a-fA-F]{40}$/.test(addr);
 }
 
-/** Pick named events from the central ABI so we never drift. */
-const BetPlacedEvent = MARKET_ABI.find((x) => x.type === "event" && x.name === "BetPlaced")!;
-const WinningsDistributedEvent = MARKET_ABI.find(
-  (x) => x.type === "event" && x.name === "WinningsDistributed"
-)!;
-const BetRefundedEvent = MARKET_ABI.find((x) => x.type === "event" && x.name === "BetRefunded")!;
-const MarketResolvedEvent = MARKET_ABI.find(
-  (x) => x.type === "event" && x.name === "MarketResolved"
-)!;
+/** Pick named events from the central ABI so we never drift. `getAbiItem`
+ * preserves the `as const` literal types so `log.args` is fully typed. */
+const BetPlacedEvent = getAbiItem({ abi: MARKET_ABI, name: "BetPlaced" });
+const WinningsDistributedEvent = getAbiItem({ abi: MARKET_ABI, name: "WinningsDistributed" });
+const BetRefundedEvent = getAbiItem({ abi: MARKET_ABI, name: "BetRefunded" });
+const MarketResolvedEvent = getAbiItem({ abi: MARKET_ABI, name: "MarketResolved" });
 
 interface BetEntry {
   txHash: string;
@@ -65,28 +62,28 @@ export async function GET(req: NextRequest) {
     const [betLogs, winLogs, refundLogs, resolvedLogs] = await Promise.all([
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: BetPlacedEvent as any,
+        event: BetPlacedEvent,
         args: { bettor: address as `0x${string}` },
         fromBlock: "earliest",
         toBlock: "latest"
       }),
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: WinningsDistributedEvent as any,
+        event: WinningsDistributedEvent,
         args: { bettor: address as `0x${string}` },
         fromBlock: "earliest",
         toBlock: "latest"
       }),
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: BetRefundedEvent as any,
+        event: BetRefundedEvent,
         args: { bettor: address as `0x${string}` },
         fromBlock: "earliest",
         toBlock: "latest"
       }),
       publicClient.getLogs({
         address: ZERO_SIGHT_MARKET_ADDRESS as `0x${string}`,
-        event: MarketResolvedEvent as any,
+        event: MarketResolvedEvent,
         fromBlock: "earliest",
         toBlock: "latest"
       })

@@ -106,7 +106,7 @@ export function MarketCard({ marketId }: MarketCardProps) {
   })();
 
   return (
-    <div className="group flex flex-col rounded-2xl bg-[#141414] p-5 shadow-lg transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-black/40">
+    <div className="group flex flex-col rounded-2xl border border-white/5 bg-[#141414] p-5 shadow-sm shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-neon/30 hover:shadow-lg hover:shadow-black/30">
       {/* Header — entire card is one Link to detail page */}
       <Link href={`/market/${marketId}`} className="block">
         <div className="mb-4 flex items-center justify-between">

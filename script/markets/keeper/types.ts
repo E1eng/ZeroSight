@@ -23,6 +23,7 @@ export type Phase =
   | "starting"        // tx in flight: startNextMarket
   | "open"            // open for bets, deadline not yet reached
   | "locking"         // deadline passed; revealing/locking in progress
+  | "revealing"       // locked window: staggered decryption + revealChoices
   | "revealed"        // choices revealed, waiting for resolve window
   | "resolving"       // tx in flight: resolveMarket
   | "distributing"    // distribution batches in progress

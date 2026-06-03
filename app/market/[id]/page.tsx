@@ -458,8 +458,8 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         </div>
       </div>
       
-      <main className="grid flex-1 gap-12 lg:grid-cols-[1.2fr_1fr] min-w-0">
-        <section className="space-y-6 min-w-0">
+      <main className="grid flex-1 gap-6 lg:grid-cols-[1.2fr_1fr] lg:gap-8 min-w-0">
+        <section className="order-2 space-y-6 min-w-0 lg:order-1">
           <div className="rounded-3xl border border-white/5 bg-[#141414] p-6">
             <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-col gap-1">
@@ -496,7 +496,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           </div>
         </section>
 
-        <aside className="flex flex-col gap-6 rounded-3xl border border-white/10 bg-[#141414] p-6 min-w-0">
+        <aside className="order-1 flex flex-col gap-6 rounded-3xl border border-white/10 bg-[#141414] p-6 min-w-0 lg:order-2">
           <div>
             <h2 className="text-xl font-semibold text-zinc-100">Encrypted Order Ticket</h2>
             <p className="text-sm text-zinc-400">
