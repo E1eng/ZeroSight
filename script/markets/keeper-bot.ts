@@ -11,7 +11,7 @@
  */
 import { ASSETS } from "./keeper/types";
 import type { AssetState } from "./keeper/types";
-import { ethersWallet, ZERO_SIGHT_MARKET_ADDRESS } from "./keeper/clients";
+import { ethersWallet, ZERO_SIGHT_MARKET_ADDRESS, getCdrClient } from "./keeper/clients";
 import { log } from "./keeper/logger";
 import { startHealthServer } from "./keeper/health";
 import { tickAsset } from "./keeper/state-machine";
@@ -89,6 +89,20 @@ async function main() {
     lastError: runtime.lastError,
     states
   }));
+
+  // Warm the CDR validator registry/attestation cache so the first reveal of
+  // the locked window doesn't stall on it. Best-effort — never blocks boot.
+  void (async () => {
+    try {
+      const cdr = await getCdrClient();
+      await cdr.consumer.prefetchRegistry();
+      log.info("cdr.prefetchRegistry.ok");
+    } catch (err) {
+      log.warn("cdr.prefetchRegistry.failed", {
+        err: err instanceof Error ? err.message : String(err)
+      });
+    }
+  })();
 
   await loop();
   const timer = setInterval(loop, CHECK_INTERVAL_MS);

@@ -61,6 +61,16 @@ export async function decryptVault(
       return { direction: dir as 0 | 1 };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+
+      // An empty vault never had ciphertext written (e.g. the write tx failed
+      // after allocate). The SDK raises this synchronously before spending a
+      // read fee — retrying can't help, so bail immediately → refund.
+      const name = err instanceof Error ? err.name : "";
+      if (name === "EmptyVaultError" || /empty vault/i.test(errMsg)) {
+        log.warn("decrypt.emptyVault", { vaultId, bettor });
+        return null;
+      }
+
       const last = attempt === MAX_RETRIES;
       if (last) {
         log.error("decrypt.failed", { vaultId, bettor, attempts: MAX_RETRIES, err: errMsg });

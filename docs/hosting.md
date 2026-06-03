@@ -29,10 +29,15 @@ Set these in **Site config → Environment variables** (or `netlify env:set`):
 | `NEXT_PUBLIC_STORY_RPC` | public | `https://aeneid.storyrpc.io` |
 | `NEXT_PUBLIC_STORY_API` | public | CDR API URL |
 | `NEXT_PUBLIC_STORY_CHAIN_ID` | public | `1315` |
-| `NEXT_PUBLIC_PRIVY_APP_ID` | public | Privy app id |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | public | Privy app id — **required**, or wallet login fails (the build no longer crashes without it, but auth won't work) |
 | `DEPLOYER_PRIVATE_KEY` | **secret** | used by `/api/cdr/*` server routes to allocate/write vaults gaslessly |
 
-> ⚠️ **Security note (read before going public).** `/api/cdr/allocate` and `/api/cdr/write` sign with `DEPLOYER_PRIVATE_KEY` server-side and are called directly from the browser, so they are effectively **open endpoints that spend gas from that wallet**. For a testnet demo this is acceptable. Before any real traffic:
+> ⚠️ **Mixed-content blocker (fix before custom domain).** The CDR API is currently `http://172.192.41.96:1317` (plain HTTP IP). A browser on `https://zerosight.xyz` will **block** that insecure request — client-side CDR encrypt/allocate breaks on the live HTTPS domain even though it works on `localhost`. Options:
+> - Put the CDR API behind **HTTPS** (a reverse proxy / Cloudflare-proxied subdomain like `https://cdr.zerosight.xyz` → the IP) and set `NEXT_PUBLIC_STORY_API` to that.
+> - Or route CDR reads/writes only through the server-side `/api/cdr/*` routes (which can call HTTP since they run on the server), and stop calling the CDR API from the browser.
+> Until then, the app may work on the Netlify `*.netlify.app` preview (also HTTPS, same issue) — so plan to terminate the CDR API over TLS for any public use.
+
+> ⚠️ **Security note.** `/api/cdr/allocate` and `/api/cdr/write` sign with `DEPLOYER_PRIVATE_KEY` server-side and are called directly from the browser, so they are effectively **open endpoints that spend gas from that wallet**. For a testnet demo this is acceptable. Before any real traffic:
 > - Fund that wallet with a **small, capped** amount of testnet IP only.
 > - Treat it as a hot key — never the cold owner key in production. (Today it doubles as deployer; for mainnet, split it.)
 > - Add rate-limiting / a server-verified auth (e.g. verify a Privy session token in the route) so the endpoints can't be drained. A `NEXT_PUBLIC_*` shared secret does **not** help — it ships in the browser bundle.
@@ -49,6 +54,34 @@ Set these in **Site config → Environment variables** (or `netlify env:set`):
 5. After it's linked, every push to the default branch auto-builds and deploys. Use **Deploys → Trigger deploy** for a manual rebuild (e.g. after changing env vars — env changes need a fresh build to take effect).
 
 > No CLI needed. `netlify.toml` is the single source of truth for build config, so the dashboard and any future CLI use stay in sync.
+
+### Custom domain: `zerosight.xyz` (DNS on Cloudflare)
+
+Netlify hosts the site; Cloudflare just points DNS at it. Two ways — **A) Netlify DNS records on Cloudflare** (recommended, simplest TLS) or **B) Netlify as the apex via their load balancer**.
+
+**Steps (Cloudflare-managed DNS → Netlify):**
+
+1. **Netlify → Site config → Domain management → Add a custom domain** → enter `zerosight.xyz`. Add `www.zerosight.xyz` too; pick one as primary (apex `zerosight.xyz` is fine) and let the other redirect.
+2. Netlify shows the target host. In **Cloudflare → DNS**, add:
+
+   | Type | Name | Value | Proxy |
+   |------|------|-------|-------|
+   | `CNAME` | `www` | `<your-site>.netlify.app` | **DNS only (grey cloud)** |
+   | `A` | `@` (apex) | `75.2.60.5` (Netlify's load balancer) | **DNS only (grey cloud)** |
+
+   Or, if you prefer CNAME flattening for the apex (Cloudflare supports it):
+
+   | Type | Name | Value | Proxy |
+   |------|------|-------|-------|
+   | `CNAME` | `@` | `<your-site>.netlify.app` | **DNS only (grey cloud)** |
+
+3. **Turn the proxy OFF (grey cloud)** for these records. If the orange cloud is on, Cloudflare terminates TLS and Netlify can't provision its Let's Encrypt cert → you get redirect loops / cert errors. Leave it grey at least until Netlify shows the cert as issued.
+4. Back in Netlify, wait for **HTTPS / SSL** to show "Certificate provisioned" (a few minutes after DNS propagates). Netlify auto-renews it.
+5. Enable **Force HTTPS** in Netlify domain settings.
+
+**Cloudflare SSL mode:** if you later re-enable the orange proxy, set **SSL/TLS → Full (strict)** — never "Flexible" (Flexible causes redirect loops with Netlify's own HTTPS redirect).
+
+> The app reads its own base URL from `metadataBase` (`https://zerosight.xyz`) for social/OG previews — already set in `app/layout.tsx`. No env var needed for the domain itself.
 
 ---
 
@@ -130,7 +163,10 @@ from on-chain state, so restarting mid-round is safe.
 ## 3. Post-deploy checklist
 
 - [ ] Netlify build green; site loads; wallet connects on Story Aeneid.
+- [ ] **Privy dashboard → allowed origins** includes `https://zerosight.xyz` (and `https://www.zerosight.xyz`) — otherwise login fails on the live domain.
+- [ ] Cloudflare DNS records are **grey-cloud (DNS only)** and Netlify shows the cert as provisioned; **Force HTTPS** enabled.
 - [ ] Placing a bet works end-to-end (encrypt → allocate → write → on-chain confirm).
+- [ ] Open Graph preview looks right (test the URL in the Twitter/LinkedIn post composer or a card validator).
 - [ ] Keeper `/health` returns 200; `/status` shows assets advancing through phases.
 - [ ] A full round settles (Open → Locked → Resolved → Distributed) and shows up in `/portfolio`.
 - [ ] CDR signer wallet (`DEPLOYER_PRIVATE_KEY`) funded with a **small** testnet balance only.

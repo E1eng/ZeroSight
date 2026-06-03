@@ -25,7 +25,15 @@ function emit(level: Level, msg: string, fields: Record<string, unknown> = {}) {
     // eslint-disable-next-line no-console
     console.log(`${ts} ${tag} ${msg}${fieldStr}`);
   } else {
-    process.stdout.write(JSON.stringify({ ts, level, msg, ...fields }) + "\n");
+    // BigInt is not JSON-serializable by default. Snapshot fields routinely
+    // carry bigints (roundId, distributionIndex, …), so without this replacer
+    // the JSON-lines branch (PM2 / non-TTY) throws "Do not know how to
+    // serialize a BigInt" and aborts the whole tick before any tx is sent.
+    const line = JSON.stringify(
+      { ts, level, msg, ...fields },
+      (_, x) => (typeof x === "bigint" ? x.toString() : x)
+    );
+    process.stdout.write(line + "\n");
   }
 }
 
