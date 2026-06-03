@@ -18,6 +18,7 @@ export function TopNav() {
   const [copied, setCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLDivElement>(null);
+  const navBtnRef = useRef<HTMLButtonElement>(null);
 
   const connectedWallet = useMemo(() => {
     if (!wallets.length) return null;
@@ -59,11 +60,14 @@ export function TopNav() {
     };
   }, [menuOpen]);
 
-  // Close the mobile nav drawer on outside click / Escape.
+  // Close the mobile nav drawer on outside click / Escape. The hamburger
+  // button is excluded so its own onClick toggle isn't immediately undone.
   useEffect(() => {
     if (!navOpen) return;
     const onClick = (e: MouseEvent) => {
-      if (navRef.current && !navRef.current.contains(e.target as Node)) setNavOpen(false);
+      const target = e.target as Node;
+      if (navBtnRef.current && navBtnRef.current.contains(target)) return;
+      if (navRef.current && !navRef.current.contains(target)) setNavOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setNavOpen(false);
     document.addEventListener("mousedown", onClick);
@@ -108,6 +112,7 @@ export function TopNav() {
         <div className="flex min-w-0 items-center gap-2 sm:gap-8">
           {/* Hamburger — mobile only */}
           <button
+            ref={navBtnRef}
             type="button"
             onClick={() => setNavOpen((v) => !v)}
             aria-label="Toggle navigation"
