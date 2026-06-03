@@ -51,10 +51,9 @@ export function MarketStatusDisplay({ assetIndex }: { assetIndex: AssetIndex }) 
       return;
     }
     // For Open markets count down to the deadline; for Locked markets count
-    // down to the resolve moment (deadline + lock window). Hourly lock ≈60s,
-    // daily ≈600s — mirrors the keeper's schedule.
-    const isDaily = assetIndex >= 3;
-    const lockWindow = isDaily ? 600 : 60;
+    // down to the resolve moment (deadline + lock window). Both cadences use a
+    // 10-min lock window — mirrors the keeper's schedule.
+    const lockWindow = 600;
     const target = status === 1 ? deadline + lockWindow : deadline;
 
     const tick = () => {

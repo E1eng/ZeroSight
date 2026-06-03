@@ -65,8 +65,6 @@ curl -s localhost:8787/status | jq
 | Var | Default | Purpose |
 |-----|---------|---------|
 | `KEEPER_INTERVAL_MS` | 15000 | tick interval |
-| `HOURLY_OPEN_SECONDS` | 240 | hourly betting window |
-| `HOURLY_LOCK_SECONDS` | 60 | hourly lock→resolve gap |
 | `STORY_RPC_FALLBACKS` | — | comma-separated backup RPCs |
 | `KEEPER_HEALTH_PORT` | — | health server port (unset = disabled) |
 | `KEEPER_STALL_MS` | 120000 | stall threshold for `/health` |

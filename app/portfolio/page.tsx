@@ -85,6 +85,26 @@ function StatusBadge({ status }: { status: BetEntry["status"] }) {
   );
 }
 
+/** Renders the bet direction as a clean colored arrow (green up / red down).
+ *  Non-directional states (Encrypted, Decrypt failed) pass through as text. */
+function ChoiceLabel({ choice }: { choice: string }) {
+  if (choice.includes("Up")) {
+    return (
+      <span className="inline-flex items-center gap-1 font-semibold text-emerald-400">
+        <span aria-hidden className="text-base leading-none">↑</span> Up
+      </span>
+    );
+  }
+  if (choice.includes("Down")) {
+    return (
+      <span className="inline-flex items-center gap-1 font-semibold text-red-400">
+        <span aria-hidden className="text-base leading-none">↓</span> Down
+      </span>
+    );
+  }
+  return <span className="text-zinc-400">{choice}</span>;
+}
+
 function StatCard({
   label,
   value,
@@ -324,7 +344,7 @@ export default function PortfolioPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 font-mono text-zinc-400">#{bet.roundId}</td>
-                      <td className="px-6 py-4 font-semibold text-zinc-300">{bet.choice}</td>
+                      <td className="px-6 py-4 text-sm"><ChoiceLabel choice={bet.choice} /></td>
                       <td className="px-6 py-4 font-mono font-semibold text-zinc-200">
                         {formatIP(bet.amount)} IP
                       </td>
@@ -395,7 +415,7 @@ export default function PortfolioPage() {
                     </div>
                     <div>
                       <span className="text-zinc-500">Choice</span>
-                      <p className="font-semibold text-zinc-200">{bet.choice}</p>
+                      <p className="font-semibold text-zinc-200"><ChoiceLabel choice={bet.choice} /></p>
                     </div>
                     <div>
                       <span className="text-zinc-500">Amount</span>
