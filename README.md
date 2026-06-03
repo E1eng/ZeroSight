@@ -12,7 +12,7 @@ The on-chain contract only ever sees the **bet amount** and a **CDR vault UUID**
 - 🏦 **2% protocol fee** to a separate treasury
 - 🔑 **Role split** (owner / keeper / treasury) — a compromised hot key can't upgrade or drain
 - 🛡 **Pausable** + **oracle staleness guard** + property-tested payout accounting
-- 🤖 **Autonomous keeper** with RPC failover, health checks, and structured logs
+- 🤖 **Autonomous keeper** — RPC failover, replace-by-fee gas bumps, parallel CDR decryption, health checks, and structured logs
 
 ## Documentation
 

@@ -48,7 +48,7 @@ Six independent market slots run in parallel:
 
 1. **Open** — `startNextMarket` snapshots the Redstone opening price, sets a deadline, and bumps `currentRoundId`. Users place encrypted bets.
 2. **Locked** — at the deadline the keeper calls `lockMarket` (cheap, instant). Betting closes.
-3. **Staggered reveal** — during the locked window the keeper decrypts vaults in **small batches per tick** and submits `revealChoices` incrementally. Time-weighted shares (1x→2x, decaying toward the deadline) are computed on reveal.
+3. **Staggered reveal** — during the locked window the keeper decrypts vaults in **small parallel batches per tick** (bounded concurrency) and submits `revealChoices` incrementally. Time-weighted shares (1x→2x, decaying toward the deadline) are computed on reveal.
 4. **Resolved** — after the lock window the keeper calls `resolveMarket`: pulls the signed Redstone price, compares against the per-asset target threshold, sets the winning direction, deducts the 2% protocol fee to the treasury.
 5. **Distributed** — `distributeWinnings` pays winners in gas-bounded batches via push-safe `call`. Bets that never decrypted are refunded in full.
 6. **Auto-restart** — once distribution completes, the keeper opens the next round.

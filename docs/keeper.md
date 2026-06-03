@@ -10,6 +10,7 @@ script/markets/keeper/
 ├── logger.ts         # structured logs (JSON lines in prod, pretty in TTY)
 ├── clients.ts        # ethers + viem + CDR clients; RPC failover provider
 ├── nonce.ts          # nonce manager (fresh per-tx, serialised — no collisions)
+├── send-tx.ts        # resilient sender: wait-with-timeout + replace-by-fee gas bump
 ├── onchain-read.ts   # snapshot reads (status, bettors, signers) — block-timestamp based
 ├── onchain-write.ts  # gas-aware txs, Redstone-wrapped where needed
 ├── schedule.ts       # UTC-safe deadline math
@@ -22,9 +23,10 @@ script/markets/keeper/
 ## Reliability properties
 
 - **No nonce collisions** — every tx fetches a fresh `pending` nonce inside a serialised lock; the previous tx is awaited to confirmation before the next starts. Survives keeper restarts and slow RPCs.
+- **No stuck-tx deadlock** — `send-tx.ts` waits for the receipt with a hard timeout. If a tx doesn't confirm in time it is **resubmitted with the same nonce and bumped gas** (replace-by-fee); whichever lands first wins. A single underpriced tx can no longer hang the whole keeper.
 - **RPC failover** — `FallbackProvider` rotates across `STORY_RPC_URL` + `STORY_RPC_FALLBACKS` (comma-separated).
-- **UTC scheduling** — deadlines computed from `block.timestamp`, immune to local clock drift.
-- **Staggered reveal** — decrypts a small batch per tick across the locked window instead of one giant blocking decrypt; keeps all 6 markets progressing.
+- **UTC scheduling** — deadlines computed from `block.timestamp` (fetched **once per loop** and shared across all assets), immune to local clock drift.
+- **Parallel staggered reveal** — decrypts a small batch per tick across the locked window, with **bounded concurrency** (`KEEPER_DECRYPT_CONCURRENCY`) inside each batch so slow CDR round-trips don't serialise past the window. Unrevealed-bet reads also run with bounded concurrency (`KEEPER_READ_CONCURRENCY`).
 - **One tx per tick** — bounded concurrency; an in-flight loop is skipped (`loop.skipOverlapping`) rather than stacked.
 - **Graceful shutdown** — SIGINT/SIGTERM let the in-flight tick settle before exit (no half-sent txs).
 - **Alerting** — failed settlement-critical ops fire a rate-limited webhook.
@@ -69,3 +71,9 @@ curl -s localhost:8787/status | jq
 | `KEEPER_HEALTH_PORT` | — | health server port (unset = disabled) |
 | `KEEPER_STALL_MS` | 120000 | stall threshold for `/health` |
 | `KEEPER_ALERT_WEBHOOK` | — | Discord/Slack webhook |
+| `KEEPER_TX_TIMEOUT_MS` | 45000 | per-attempt wait before a gas-bumped resubmit |
+| `KEEPER_TX_MAX_ATTEMPTS` | 3 | max submit attempts per tx (replace-by-fee) |
+| `KEEPER_GAS_BUMP_PERCENT` | 30 | gas increase per retry |
+| `KEEPER_TX_CONFIRMATIONS` | 1 | confirmations required before a tx is "done" |
+| `KEEPER_DECRYPT_CONCURRENCY` | 4 | max simultaneous CDR decryptions per batch |
+| `KEEPER_READ_CONCURRENCY` | 8 | max simultaneous `getUserBets` reads |
