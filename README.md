@@ -1,4 +1,4 @@
-# ZeroSight Protocol 🕶️
+# ZeroSight Protocol 
 
 A **blind parimutuel prediction market** on the Story Protocol Aeneid Testnet. Bettor choices (Up/Down) are encrypted client-side with the **Story CDR (Confidential Data Rails) SDK** and stored in threshold-encrypted vaults. No one not even the smart contract can see a bet until the market resolves, which prevents copy-trading and front-running.
 
