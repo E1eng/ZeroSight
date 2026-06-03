@@ -53,14 +53,14 @@ export default function Home() {
       out = [...out].sort((a, b) => MARKET_METADATA[a].label.localeCompare(MARKET_METADATA[b].label));
     }
     return out;
-  }, [search, category, sort, status]);
+  }, [search, category, sort]);
 
   return (
     <div className="mx-auto flex w-full max-w-[1400px] flex-col px-6 py-8 lg:px-12">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-widest text-zinc-100 sm:text-3xl">
-          PREDICTION MARKETS — LIVE ODDS &amp; EVENT CONTRACTS
+          PREDICTION MARKETS 
         </h1>
         <p className="mt-2 text-sm text-zinc-500">
           Encrypted bets via Story CDR · Settled by Redstone oracles

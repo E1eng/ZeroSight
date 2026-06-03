@@ -1,13 +1,12 @@
 # ZeroSight Protocol 🕶️
 
-A **blind parimutuel prediction market** on the Story Protocol Aeneid Testnet. Bettor choices (Up/Down) are encrypted client-side with the **Story CDR (Confidential Data Rails) SDK** and stored in threshold-encrypted vaults. No one — not even the smart contract — can see a bet until the market resolves, which prevents copy-trading and front-running.
+A **blind parimutuel prediction market** on the Story Protocol Aeneid Testnet. Bettor choices (Up/Down) are encrypted client-side with the **Story CDR (Confidential Data Rails) SDK** and stored in threshold-encrypted vaults. No one not even the smart contract can see a bet until the market resolves, which prevents copy-trading and front-running.
 
 The on-chain contract only ever sees the **bet amount** and a **CDR vault UUID**. The choice is revealed and verified only after the betting deadline.
 
 ## Highlights
 
 - 🔒 **Shielded bets** via Story CDR threshold encryption
-- 📈 **6 markets** — IP / BTC / ETH, hourly + daily — settled by **Redstone** oracles
 - ⏱ **Time-weighted shares** (up to 2x for early bets)
 - 🏦 **2% protocol fee** to a separate treasury
 - 🔑 **Role split** (owner / keeper / treasury) — a compromised hot key can't upgrade or drain
@@ -22,7 +21,9 @@ The on-chain contract only ever sees the **bet amount** and a **CDR vault UUID**
 | [docs/contract.md](docs/contract.md) | Contract versions, roles, invariants, safety mechanisms, deployed addresses |
 | [docs/keeper.md](docs/keeper.md) | Keeper module layout, reliability properties, observability, tuning |
 | [docs/deployment.md](docs/deployment.md) | Fresh deploy + V1→V2→V3 upgrade commands and verification |
+| [docs/hosting.md](docs/hosting.md) | Frontend on Netlify + keeper on a VPS (PM2 / Docker) |
 | [docs/runbook.md](docs/runbook.md) | Ops: restart, pause, rotate keeper, settle stuck rounds |
+| [docs/demo-script.md](docs/demo-script.md) | Recordable 2–3 min product walkthrough |
 | [docs/security.md](docs/security.md) | Trust model, keeper limitation, planned trustless reveal (V4) |
 
 ## Quick start

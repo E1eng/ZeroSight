@@ -15,8 +15,8 @@ const config: Config = {
         dark: "#141414"
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui"],
-        mono: ["Space Grotesk", "ui-monospace", "SFMono-Regular"]
+        sans: ["var(--font-inter)", "Inter", "ui-sans-serif", "system-ui"],
+        mono: ["var(--font-space-grotesk)", "Space Grotesk", "ui-monospace", "SFMono-Regular"]
       },
       borderRadius: {
         "4xl": "2rem"

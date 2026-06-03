@@ -34,3 +34,6 @@ lib/forge-std
 # PM2
 .pm2/
 keeper.log
+
+# Demo bring-up (scripts/demo-up.sh)
+.demo-logs/

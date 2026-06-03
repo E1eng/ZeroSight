@@ -15,6 +15,7 @@ import { ethersWallet, ZERO_SIGHT_MARKET_ADDRESS } from "./keeper/clients";
 import { log } from "./keeper/logger";
 import { startHealthServer } from "./keeper/health";
 import { tickAsset } from "./keeper/state-machine";
+import { getChainNow } from "./keeper/onchain-read";
 
 const CHECK_INTERVAL_MS = Number(process.env.KEEPER_INTERVAL_MS ?? "15000");
 
@@ -45,10 +46,23 @@ async function loop() {
   }
   isRunning = true;
   try {
+    // Fetch chain time ONCE per loop and share it with every asset tick, rather
+    // than each tick fetching the latest block (6× getBlock per loop before).
+    let sharedNow: number | undefined;
+    try {
+      sharedNow = await getChainNow();
+    } catch (err) {
+      // If the time read fails, ticks fall back to their own fetch.
+      sharedNow = undefined;
+      log.warn("loop.chainNowFailed", {
+        err: err instanceof Error ? err.message : String(err)
+      });
+    }
+
     for (const state of states) {
       if (stopping) break;
       try {
-        await tickAsset(state);
+        await tickAsset(state, sharedNow);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         runtime.lastError = msg;

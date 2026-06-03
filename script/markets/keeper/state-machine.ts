@@ -25,6 +25,34 @@ const DISTRIBUTE_BATCH_SIZE = 50;
 // round-trips), so small batches keep all 6 markets progressing in parallel.
 const REVEAL_BATCH_SIZE = 8;
 
+// Max simultaneous CDR decryptions within a batch. Each decrypt is a slow
+// validator round-trip (timeout up to 120s); doing them serially can blow past
+// the lock window. Running a bounded number in parallel keeps the batch within
+// the window without flooding the CDR API.
+const DECRYPT_CONCURRENCY = Number(process.env.KEEPER_DECRYPT_CONCURRENCY ?? "4");
+
+/**
+ * Map over items with a bounded number of in-flight promises. Preserves input
+ * order in the returned results array.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 /**
  * Single tick of the keeper for one asset. Stateless w.r.t. the chain — every
  * decision is driven by a fresh `MarketSnapshot` so we do not get out of sync
@@ -33,11 +61,12 @@ const REVEAL_BATCH_SIZE = 8;
  * Returns the new in-memory phase. The only side-effect is at most ONE
  * privileged tx per tick — never chained — so nonce concurrency stays bounded.
  */
-export async function tickAsset(state: AssetState): Promise<void> {
+export async function tickAsset(state: AssetState, sharedNow?: number): Promise<void> {
   const ctx = { asset: state.key, index: state.index };
 
-  // Cooldown: skip if we recently errored.
-  const now = await getChainNow();
+  // Cooldown: skip if we recently errored. Reuse the loop-level chain time when
+  // provided so we don't fetch the latest block once per asset every tick.
+  const now = sharedNow ?? (await getChainNow());
   if (state.cooldownUntil > now) {
     log.debug("tick.cooldown", { ...ctx, until: state.cooldownUntil });
     return;
@@ -186,15 +215,20 @@ async function revealBatch(
 
   log.info("decrypt.batch", { ...ctx, batch: batch.length, remaining: unrevealed.length });
 
+  // Decrypt the batch with bounded concurrency instead of one-at-a-time.
+  const decrypted = await mapWithConcurrency(batch, DECRYPT_CONCURRENCY, (item) =>
+    decryptVault(item.vaultId, item.bettor)
+  );
+
   const revealedBettors: string[] = [];
   const revealedVaults: string[] = [];
   const revealedChoices: number[] = [];
 
-  for (const item of batch) {
-    const result = await decryptVault(item.vaultId, item.bettor);
+  for (let i = 0; i < batch.length; i++) {
+    const result = decrypted[i];
     if (result === null) continue; // stays unrevealed → refunded later
-    revealedBettors.push(item.bettor);
-    revealedVaults.push(item.vaultId);
+    revealedBettors.push(batch[i].bettor);
+    revealedVaults.push(batch[i].vaultId);
     revealedChoices.push(result.direction);
   }
 

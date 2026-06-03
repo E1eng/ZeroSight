@@ -66,8 +66,7 @@ export async function POST(req: Request) {
 
     console.log(`Vault ${uuidNum} written successfully!`);
 
-    return NextResponse.json({
-      txHash: writeResult.txHash,
+    return NextResponse.json({      txHash: writeResult.txHash,
     });
   } catch (error: any) {
     console.error("Error in /api/cdr/write:", error);

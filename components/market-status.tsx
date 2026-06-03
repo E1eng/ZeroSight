@@ -15,7 +15,7 @@ export function MarketStatusDisplay({ assetIndex }: { assetIndex: AssetIndex }) 
   // -1 represents "loading", so we never accidentally render Resolved or
   // Betting Closed before the first fetch completes.
   const [status, setStatus] = useState<number>(-1);
-  const [totalPool, setTotalPool] = useState<bigint>(0n);
+  const [totalPool, setTotalPool] = useState<bigint>(BigInt(0));
   const [deadline, setDeadline] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState<number>(0);
 
@@ -104,22 +104,22 @@ export function MarketStatusDisplay({ assetIndex }: { assetIndex: AssetIndex }) 
   const poolFormatted = formatEther(totalPool);
 
   return (
-    <div className="flex items-center gap-6 rounded-2xl border border-white/5 bg-black/40 px-6 py-4">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-white/5 bg-black/40 px-5 py-4">
       <div className="flex flex-col gap-1">
         <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Status</span>
         <div className="flex items-center gap-2">
-          <div className={`h-2 w-2 rounded-full ${config.color} shadow-[0_0_8px_currentColor]`} />
-          <span className={`text-sm font-semibold uppercase tracking-wider ${config.text}`}>
+          <div className={`h-2 w-2 shrink-0 rounded-full ${config.color} shadow-[0_0_8px_currentColor]`} />
+          <span className={`whitespace-nowrap text-sm font-semibold uppercase tracking-wider ${config.text}`}>
             {config.label}
           </span>
         </div>
       </div>
 
-      <div className="h-8 w-px bg-white/10" />
+      <div className="hidden h-8 w-px bg-white/10 sm:block" />
 
       <div className="flex flex-col gap-1">
         <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Total Pool</span>
-        <span className="text-sm font-mono font-semibold text-zinc-200">
+        <span className="whitespace-nowrap text-sm font-mono font-semibold text-zinc-200">
           {Number(poolFormatted).toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 6

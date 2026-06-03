@@ -1,0 +1,10 @@
+# Vendored Foundry / Solidity dependencies — not part of the Next.js app.
+lib/openzeppelin-contracts/
+lib/openzeppelin-contracts-upgradeable/
+lib/forge-std/
+lib/redstone-oracles-monorepo/
+
+# Build output
+.next/
+out/
+node_modules/

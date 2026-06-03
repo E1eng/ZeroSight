@@ -1,0 +1,21 @@
+# Netlify config for the ZeroSight Next.js (App Router, SSR + API routes) app.
+# The official @netlify/plugin-nextjs handles SSR, API routes, and image
+# optimization automatically — no manual publish dir for App Router SSR.
+
+[build]
+  command = "npm run build"
+
+[build.environment]
+  # CDR SDK / helia file storage needs Node 22+.
+  NODE_VERSION = "22"
+  # Keep peer-dep resolution lenient (web3 stacks pin a lot).
+  NPM_FLAGS = "--legacy-peer-deps"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Long-cache the immutable hashed Next static assets.
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

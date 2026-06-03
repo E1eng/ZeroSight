@@ -31,13 +31,24 @@ export async function placeBetOnChain(params: {
 
   const walletClient = await createPrivyWalletClient(wallet);
 
-  return walletClient.writeContract({
+  const hash = await walletClient.writeContract({
     address: ZERO_SIGHT_MARKET_ADDRESS,
     abi: MARKET_ABI,
     functionName: "placeBet",
     args: [vaultId, assetIndex],
     value: parseEther(amount.toString())
   });
+
+  // Wait for the receipt and confirm it didn't revert. Without this, a bet
+  // submitted right at the lock boundary reverts on-chain but the caller would
+  // still treat it as placed (and add it to local history). A reverted tx
+  // throws here so the UI can surface the failure and skip recording it.
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") {
+    throw new Error("Transaction reverted on-chain — the market may have just closed.");
+  }
+
+  return hash;
 }
 
 export interface MarketState {

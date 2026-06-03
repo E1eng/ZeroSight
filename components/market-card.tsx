@@ -31,7 +31,7 @@ export function MarketCard({ marketId }: MarketCardProps) {
   const [status, setStatus] = useState(0);
   const [openingPrice, setOpeningPrice] = useState(0);
   const [deadline, setDeadline] = useState(0);
-  const [pool, setPool] = useState<bigint>(0n);
+  const [pool, setPool] = useState<bigint>(BigInt(0));
   const [bettorCount, setBettorCount] = useState(0);
   const [now, setNow] = useState(Math.floor(Date.now() / 1000));
 

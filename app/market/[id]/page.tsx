@@ -138,7 +138,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     if (!walletAccount || walletAccount.type !== "wallet") return null;
     return walletAccount.address ?? null;
   }, [connectedWallet, user]);
-  const { addBet } = useBets(primaryWallet ?? undefined);
+  const { addBet, localBets } = useBets(primaryWallet ?? undefined);
   const walletDisplay = useMemo(() => {
     if (!primaryWallet) return null;
     return `${primaryWallet.slice(0, 6)}…${primaryWallet.slice(-4)}`;
@@ -188,7 +188,6 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     }
 
     setIsSubmitting(true);
-    const toastId = toast.loading("Encrypting bet payload and uploading to Story CDR…");
     setStatusMessage("Encrypting bet payload and uploading to Story CDR…");
 
     try {
@@ -220,12 +219,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         payload: payloadBytes
       });
 
-      toast.update(
-        toastId,
-        "loading",
-        `Vault #${result.uuid} secured. Confirm the bet in your wallet…`
-      );
-      setStatusMessage(`Secured bet in encrypted vault #${result.uuid}. Broadcasting bet…`);
+      setStatusMessage(`Vault #${result.uuid} secured. Confirm the bet in your wallet…`);
 
       const betTx = await placeBetOnChain({
         wallet: walletAdapter,
@@ -234,6 +228,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         amount
       });
 
+      // Only recorded after the on-chain receipt confirms success.
       addBet({
         vaultId: result.uuid.toString(),
         market,
@@ -243,11 +238,8 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         txHash: betTx
       });
 
-      toast.update(
-        toastId,
-        "success",
-        `Bet placed 🔒 — encrypted vault #${result.uuid}. Tx ${betTx.slice(0, 10)}…`
-      );
+      // Single popup, only once the transaction is confirmed on-chain.
+      toast.success(`Bet confirmed 🔒 — vault #${result.uuid}. Tx ${betTx.slice(0, 10)}…`);
       setStatusMessage(`Encrypted vault #${result.uuid}. Bet tx: ${betTx}`);
     } catch (error) {
       console.error("Failed to encrypt bet", error);
@@ -255,7 +247,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
         error instanceof Error
           ? error.message
           : "Failed to encrypt bet. Please check console for details.";
-      toast.update(toastId, "error", message);
+      // Errors surface inline under the button only — no popup.
       setStatusMessage(message);
     } finally {
       setIsSubmitting(false);
@@ -271,24 +263,40 @@ export default function MarketPage({ params }: { params: { id: string } }) {
     activeMetadata.feedAddress,
     activeMetadata.assetIndex,
     addBet,
-    toast
+    toast,
+    isClosed
   ]);
 
   const targetPrice = marketState.openingPrice ? getTargetPrice(activeMetadata.assetIndex, marketState.openingPrice) : 0;
   const targetPriceFormatted = targetPrice > 0 ? formatTargetPrice(activeMetadata.assetIndex, targetPrice) : "";
 
+  // Early-bird odds: the contract rewards earlier bets with up to 2x shares
+  // (multiplier = 1.0x..2.0x, linear by time-to-deadline). We mirror that
+  // formula so the user sees how much weight a bet placed *right now* earns.
+  const PROTOCOL_FEE_PERCENT = 2;
+  const earlyBird = useMemo(() => {
+    const { openedAt, deadline, status } = marketState;
+    if (status !== 0 || deadline <= openedAt || currentTime >= deadline) return null;
+    const duration = deadline - openedAt;
+    const timeLeft = Math.max(0, deadline - currentTime);
+    // mirrors: multiplier = 1000 + 1000 * timeLeft / duration  (then /1000)
+    const multiplier = 1 + timeLeft / duration;
+    return { multiplier, timeLeft };
+  }, [marketState, currentTime]);
+
   // Blind parimutuel: per-side shares are encrypted, so we can only bound the
   // payout. Min ≈ your stake back (everyone on your side); max ≈ the whole pool
-  // (you're the lone winner). We surface the max as an upper bound + the pool
-  // size after your stake so the bet feels less blind.
+  // minus the 2% protocol fee (you're the lone winner). We surface that upper
+  // bound + the pool size after your stake so the bet feels less blind.
   const payoutPreview = useMemo(() => {
     if (!Number.isFinite(amount) || amount <= 0) return null;
     const poolNow = Number(formatEther(marketState.totalPool));
     const poolAfter = poolNow + amount;
+    const maxPayout = poolAfter * (1 - PROTOCOL_FEE_PERCENT / 100);
     return {
       poolAfter,
-      maxPayout: poolAfter,
-      maxMultiple: amount > 0 ? poolAfter / amount : 0
+      maxPayout,
+      maxMultiple: amount > 0 ? maxPayout / amount : 0
     };
   }, [amount, marketState.totalPool]);
 
@@ -461,7 +469,7 @@ export default function MarketPage({ params }: { params: { id: string } }) {
       <main className="grid flex-1 gap-6 lg:grid-cols-[1.2fr_1fr] lg:gap-8 min-w-0">
         <section className="order-2 space-y-6 min-w-0 lg:order-1">
           <div className="rounded-3xl border border-white/5 bg-[#141414] p-6">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between">
               <div className="flex flex-col gap-1">
                 <span className="text-sm font-bold text-zinc-200">
                   {cleanLabel}/USDT <span className="text-neon animate-pulse">● LIVE</span>
@@ -556,26 +564,32 @@ export default function MarketPage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {payoutPreview && !isClosed && (
-            <div className="rounded-2xl border border-white/10 bg-[#0B0B0B] p-4">
-              <div className="flex items-center justify-between text-xs">
-                <span className="uppercase tracking-[0.2em] text-zinc-500">Est. max payout</span>
-                <span className="font-mono text-sm font-semibold text-neon">
-                  {payoutPreview.maxPayout.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 4
-                  })}{" "}
-                  IP
-                </span>
-              </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
-                Parimutuel upper bound based on the {payoutPreview.poolAfter.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 4
-                })}{" "}
-                IP pool after your stake. Actual payout depends on how the pool splits at
-                resolution.
-              </p>
+          {(earlyBird || payoutPreview) && !isClosed && (
+            <div className="divide-y divide-white/5 rounded-2xl border border-white/10 bg-[#0B0B0B]">
+              {earlyBird && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-zinc-500">
+                    ⚡ Early multiplier
+                  </span>
+                  <span className="font-mono text-sm font-bold text-neon">
+                    {earlyBird.multiplier.toFixed(2)}×
+                  </span>
+                </div>
+              )}
+              {payoutPreview && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="text-xs uppercase tracking-[0.15em] text-zinc-500">
+                    Est. payout
+                  </span>
+                  <span className="font-mono text-sm font-semibold text-zinc-100">
+                    ≤ {payoutPreview.maxPayout.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 4
+                    })}{" "}
+                    IP
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -603,6 +617,74 @@ export default function MarketPage({ params }: { params: { id: string } }) {
           </div>
         </aside>
       </main>
+
+      {(() => {
+        // Bets placed from this browser (localStorage), scoped to this market.
+        const marketBets = localBets.filter((b) => b.market === market);
+        return (
+          <section className="mt-12 rounded-3xl border border-white/5 bg-[#141414] p-6">
+            <h2 className="mb-4 text-xl font-semibold text-zinc-100">My Encrypted Bets</h2>
+            {marketBets.length === 0 ? (
+              <div className="flex h-28 items-center justify-center rounded-2xl border border-dashed border-white/10 bg-black/20">
+                <p className="text-sm text-zinc-500">
+                  No bets yet on this market. Your encrypted bets will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-white/10">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-white/10 bg-white/5 text-xs uppercase text-zinc-400">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Your Choice</th>
+                      <th className="px-4 py-3 font-medium">Amount</th>
+                      <th className="px-4 py-3 font-medium">Vault ID (Encrypted)</th>
+                      <th className="px-4 py-3 text-right font-medium">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 bg-black/20">
+                    {marketBets.map((bet, i) => (
+                      <tr key={`${bet.vaultId}-${i}`} className="transition-colors hover:bg-white/5">
+                        <td className="px-4 py-3">
+                          <span
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                              bet.direction === 1
+                                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                                : "border-rose-500/20 bg-rose-500/10 text-rose-400"
+                            }`}
+                          >
+                            {bet.direction === 1 ? "UP" : "DOWN"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-zinc-300">{bet.amount} IP</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs text-zinc-500">
+                              {bet.vaultId.substring(0, 12)}…
+                            </span>
+                            {bet.txHash && (
+                              <a
+                                href={`https://aeneid.storyscan.xyz/tx/${bet.txHash}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-electric hover:underline"
+                              >
+                                ↗ Tx
+                              </a>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs text-zinc-500">
+                          {new Date(bet.placedAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        );
+      })()}
     </div>
   );
 }

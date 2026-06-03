@@ -118,23 +118,38 @@ export interface UnrevealedBet {
   vaultId: string;
 }
 
-/** Reads on-chain bets and returns the ones still flagged unrevealed. */
+/** Reads on-chain bets and returns the ones still flagged unrevealed.
+ *  Reads run with bounded concurrency so a round with many bettors doesn't
+ *  serialise into N blocking RPC round-trips per tick. */
+const READ_CONCURRENCY = Number(process.env.KEEPER_READ_CONCURRENCY ?? "8");
+
 export async function listUnrevealedBets(
   assetIndex: AssetIndex,
   bettors: string[]
 ): Promise<UnrevealedBet[]> {
   const out: UnrevealedBet[] = [];
-  for (const bettor of bettors) {
-    const bets = (await userBetsContract.getUserBets(assetIndex, bettor)) as Array<{
-      vaultId: string;
-      choiceRevealed: boolean;
-      assetIndex: number;
-    }>;
-    for (const bet of bets) {
-      if (!bet.choiceRevealed) {
-        out.push({ bettor, vaultId: bet.vaultId });
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= bettors.length) return;
+      const bettor = bettors[i];
+      const bets = (await userBetsContract.getUserBets(assetIndex, bettor)) as Array<{
+        vaultId: string;
+        choiceRevealed: boolean;
+        assetIndex: number;
+      }>;
+      for (const bet of bets) {
+        if (!bet.choiceRevealed) out.push({ bettor, vaultId: bet.vaultId });
       }
     }
   }
+
+  const workers = Array.from(
+    { length: Math.min(READ_CONCURRENCY, bettors.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
   return out;
 }
