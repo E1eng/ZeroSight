@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const res = await fetch("https://oracle-gateway-1.a.redstone.vip/v2/data-packages/latest/redstone-primary-prod", {
-      next: { revalidate: 5 } // Cache for 5 seconds to reduce rate limits
+      next: { revalidate: 10 } // Cache for 10s to cut Redstone rate-limit hits
     });
 
     if (!res.ok) {

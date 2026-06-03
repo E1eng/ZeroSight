@@ -1,5 +1,5 @@
 import { CDRClient, initWasm, uuidToLabel } from "@piplabs/cdr-sdk";
-import { createPublicClient, encodeAbiParameters, http, toHex } from "viem";
+import { createPublicClient, encodeAbiParameters, hexToBytes, http, toHex } from "viem";
 
 import {
   OWNER_WRITE_CONDITION,
@@ -67,7 +67,18 @@ export async function encryptPayload(params: {
   // 2. Encrypt locally in browser using the UUID label.
   //    uuidToLabel expects a JS number (it writes a 4-byte big-endian uint32),
   //    NOT a BigInt — passing BigInt throws "Cannot convert a BigInt value to a number".
-  const globalPubKey = await client.observer.getGlobalPubKey();
+  //
+  //    The DKG global public key is fetched from OUR https route, not directly
+  //    from the SDK's observer — the Story-API REST endpoint is plain HTTP, and
+  //    a browser on https:// would have its getGlobalPubKey() call blocked as
+  //    mixed content. The server route proxies it over HTTPS for us.
+  const pkRes = await fetch("/api/cdr/pubkey");
+  if (!pkRes.ok) {
+    throw new Error(`Failed to fetch CDR public key: ${await pkRes.text()}`);
+  }
+  const { globalPubKeyHex } = await pkRes.json();
+  const globalPubKey = hexToBytes(globalPubKeyHex as `0x${string}`);
+
   const uuidNum = Number(uuid);
   if (!Number.isSafeInteger(uuidNum) || uuidNum < 0 || uuidNum > 0xffffffff) {
     throw new Error(`Vault uuid ${uuid} out of uint32 range for label derivation`);

@@ -52,8 +52,8 @@ export default function MarketPage({ params }: { params: { id: string } }) {
       }
       return res.json();
     },
-    refetchInterval: 5000,
-    staleTime: 4000
+    refetchInterval: 10000,
+    staleTime: 9000
   });
 
   const latestPrice = oraclePriceData?.price ?? null;
